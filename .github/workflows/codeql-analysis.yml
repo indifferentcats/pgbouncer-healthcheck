@@ -23,7 +23,8 @@ on:
 jobs:
   analyze:
     name: Analyze
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest, which moves between Ubuntu releases
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read

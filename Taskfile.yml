@@ -77,6 +77,20 @@ tasks:
     cmds:
       - tests/run_tests.sh {{.APPNAME}}:test {{.CLI_ARGS}}
 
+  test:unit:
+    desc: Run Go unit tests locally (race detector + coverage into {{.DIST}}/coverage.out)
+    cmds:
+      - mkdir -p {{.DIST}}
+      - go test -race -count=1 -covermode=atomic -coverprofile={{.DIST}}/coverage.out ./...
+      - go tool cover -func={{.DIST}}/coverage.out | tail -1
+
+  coverage:
+    desc: Open an HTML coverage report
+    deps: [test:unit]
+    cmds:
+      - go tool cover -html={{.DIST}}/coverage.out -o {{.DIST}}/coverage.html
+      - echo "Wrote {{.DIST}}/coverage.html"
+
   vet:
     desc: Run go vet and check formatting locally
     cmds:

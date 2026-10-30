@@ -1,5 +1,10 @@
 # PGBouncer healthcheck
 
+[![Build](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/build.yml)
+[![Unit tests](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/unit-tests.yml/badge.svg?branch=master)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/unit-tests.yml)
+[![Coverage](https://raw.githubusercontent.com/indifferentcats/pgbouncer-healthcheck/badges/coverage.svg)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/unit-tests.yml)
+[![CodeQL](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/codeql-analysis.yml/badge.svg?branch=master)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/codeql-analysis.yml)
+
 ## Introduction
 
 This implements a http `/health` check for PGBouncer hosts.
@@ -23,6 +28,8 @@ only needed for `task vet` / `task tidy`.
     $ task build ARCH=amd64       # release (x86-64) binary
     $ task test                   # integration tests against a real PGBouncer
     $ task test -- enhanced.sh    # run a subset of test scripts
+    $ task test:unit              # Go unit tests (needs local Go), with coverage
+    $ task coverage               # HTML coverage report in dist/coverage.html
     $ task image                  # minimal FROM-scratch runtime image
     $ task --list                 # everything else
 
@@ -48,11 +55,24 @@ Run the binary with:
 
     $ ./pgbouncer-healthcheck
 
+### Continuous integration
+
+GitHub Actions run on every push to `master` and every PR:
+
+- **Build** (`build.yml`): `task build` and `task test` on native `linux/amd64`
+  (`ubuntu-24.04`) and `linux/arm64` (`ubuntu-24.04-arm`) runners. Checks the
+  binary is static and uploads it as a workflow artifact.
+- **Unit tests** (`unit-tests.yml`): `go test -race` with coverage. Results and
+  per-function coverage appear in the job summary, and the raw results are
+  uploaded as an artifact. On `master`, the coverage badge is regenerated and
+  pushed to the `badges` branch; no third-party coverage service is used.
+- **CodeQL** (`codeql-analysis.yml`): static analysis.
+
 ### Supply-chain pinning
 
 Build inputs are pinned: Go modules via `go.sum`, base images in the
-`Dockerfile` by digest, GitHub Actions by commit SHA, and the CI's go-task
-download by SHA-256. When bumping any of them, update the version and the
+`Dockerfile` by digest, GitHub Actions by commit SHA, runners to a specific
+Ubuntu release, and CI's go-task downloads by SHA-256. When bumping any of them, update the version and the
 hash together.
 
 ## Configuration

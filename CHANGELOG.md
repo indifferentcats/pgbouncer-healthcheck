@@ -76,6 +76,12 @@ Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
 ### Added
 
 - Integration tests covering the JSON shape of every `/status/*` endpoint.
+- Go unit tests for the scanner and all HTTP handlers, using a fake
+  `database/sql` driver (`task test:unit`, `task coverage`).
+- GitHub Actions workflows: build and integration tests on native amd64 and
+  arm64 runners, and unit tests with coverage. README badges show build, unit
+  test, coverage and CodeQL status.
+- `task release` to tag and publish a GitHub release with binaries.
 
 ## [2.0]
 
