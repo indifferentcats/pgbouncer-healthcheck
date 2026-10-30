@@ -12,6 +12,12 @@ import (
 
 var scannerType = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 
+// queryer is satisfied by both *sql.DB (pooled) and *sql.Conn (a single
+// dedicated connection, used by the readiness checks).
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // queryRows runs query and scans every row into a T by column name.
 //
 // Each result column is matched to the T field whose `db` tag equals the
@@ -23,8 +29,8 @@ var scannerType = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 // zero value; use pointer fields (or a NULL-aware sql.Scanner) where NULL must
 // be distinguishable. The returned slice is never nil, so it serialises to
 // JSON as [] rather than null when there are no rows.
-func queryRows[T any](ctx context.Context, db *sql.DB, query string) ([]T, error) {
-	rows, err := db.QueryContext(ctx, query)
+func queryRows[T any](ctx context.Context, q queryer, query string) ([]T, error) {
+	rows, err := q.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query PGBouncer (%s): %w", query, err)
 	}

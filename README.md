@@ -118,7 +118,11 @@ hash together.
 
 ## Configuration
 
-The binary takes its configuration from several environment variables.
+Every option can be set with an environment variable or a command-line flag.
+Flags override environment variables, which override the defaults. Run
+`pgbouncer-healthcheck -h` to list them all. Pass secrets, such as passwords
+in connection strings, through environment variables rather than flags,
+because flags are visible to other users in `ps`.
 
 ### Postgres connection string for PGBouncer connection
 
@@ -135,14 +139,26 @@ prints a SCRAM secret for PGBouncer's `auth_file`.
 
 ### Other parameters
 
-- `PORT`: The TCP port the daemon should use to listen for HTTP connections (default: 8000)
-- `ENHANCED_CHECK`: If true, test the PGBouncer health by connecting and sending a query.
-    If false, use a simple port probe. (default: false)
-- `PGBOUNCER_PORT`: The TCP port used if using the basic port probe healthcheck (default: 6543)
-- `ENABLE_DEBUG_ENDPOINTS`: If true, the extra `/debug/` endpoints will be enabled. See below (default: false)
+| Environment variable | Flag | Default | Description |
+|---|---|---|---|
+| `PORT` | `--port` | `8000` | TCP port to listen on for HTTP |
+| `CONNSTR` | `--connstr` | see above | PGBouncer admin console connection string |
+| `ENHANCED_CHECK` | `--enhanced-check` | `false` | Legacy `/health`: query PGBouncer instead of a port probe |
+| `PGBOUNCER_PORT` | `--pgbouncer-port` | `6543` | Port for the legacy `/health` port probe |
+| `ENABLE_DEBUG_ENDPOINTS` | `--enable-debug-endpoints` | `false` | Enable the `/debug/` endpoints (see below) |
+| `HEALTH_MODE` | `--health-mode` | `legacy` | What `/health` does: `legacy`, `live` or `ready` |
+| `READY_CHECKS` | `--ready-checks` | `headroom,databases` | Checks run by `/health/ready`: any of `headroom`, `databases`, `pools`, `backend` |
+| `READY_DATABASES` | `--ready-databases` | all but `pgbouncer` | Limit the `databases` and `pools` checks to these databases |
+| `CLIENT_HEADROOM_PCT` | `--client-headroom-pct` | `90` | `headroom` fails when `used_clients` reaches this % of `max_client_conn` |
+| `MAX_WAIT` | `--max-wait` | `5s` | `pools` fails when a pool's `maxwait` is longer than this |
+| `MAX_CL_WAITING` | `--max-cl-waiting` | `-1` (off) | `pools` fails when a pool has more waiting clients than this |
+| `BACKEND_CONNSTR` | `--backend-connstr` | | Connection string *through PGBouncer* to an application database, for `backend` |
+| `BACKEND_FAILURE_BACKOFF` | `--backend-failure-backoff` | `15s` | After `backend` fails, report that failure without retrying for this long |
+| `CHECK_CACHE_TTL` | `--check-cache-ttl` | `1s` | Share `/health/live` and `/health/ready` results between callers for this long |
 
-The result of the defaults is that the standard mode is just to do a TCP port probe of 6543
-on the localhost to test if PGBouncer is alive.
+With the defaults, `/health` just checks that something accepts TCP
+connections on port 6543, and `/health/live` and `/health/ready` are available
+alongside it.
 
 ## Main Endpoints
 
@@ -156,6 +172,65 @@ This always returns a `200 OK`
 ### /health
 The healthcheck returns a 200 OK response or a `500 Internal Server Error` response.
 It will probe the PGBouncer using a method depending on  `ENHANCED_CHECK`.
+
+This legacy check can report healthy while PGBouncer can't serve clients. For
+example, when `max_client_conn` is reached, PGBouncer rejects new application
+clients but still accepts the TCP connection and admin console logins. Prefer
+`/health/live` and `/health/ready`, or set `HEALTH_MODE=live` or
+`HEALTH_MODE=ready` to make `/health` use them.
+
+### /health/live
+
+Is PGBouncer itself working? Use this for liveness probes, the ones that
+restart the process. It checks that the admin console answers `SHOW VERSION`,
+and it **never depends on the databases behind PGBouncer**: restarting
+PGBouncer can't fix a database outage, and restarting every instance at once
+would drop every client.
+
+### /health/ready
+
+Should this instance receive traffic? Use this for readiness and load
+balancer health checks. Each probe logs in to the admin console fresh, so it
+also tests authentication, then runs the configured checks:
+
+| Check | Fails when | Source |
+|---|---|---|
+| `login`, `console` (always) | the admin console can't be logged in to or doesn't answer | `SHOW VERSION` |
+| `headroom` (default) | `used_clients` ≥ `CLIENT_HEADROOM_PCT`% of `max_client_conn` | `SHOW LISTS`, `SHOW CONFIG` |
+| `databases` (default) | a database in scope is paused or disabled, or a `READY_DATABASES` entry isn't configured | `SHOW DATABASES` |
+| `pools` | a pool in scope has `maxwait` > `MAX_WAIT`, or `cl_waiting` > `MAX_CL_WAITING` | `SHOW POOLS` |
+| `backend` | `SELECT 1` through PGBouncer via `BACKEND_CONNSTR` fails | the real database |
+
+Every check except `backend` only needs the permissions of a PGBouncer
+`stats_users` user.
+
+Both endpoints return `200` or `503` with a JSON report:
+
+```json
+{
+  "status": "fail",
+  "checks": [
+    {"name": "login", "ok": true, "detail": "fresh admin console login", "duration_ms": 3.1},
+    {"name": "console", "ok": true, "detail": "PgBouncer 1.25.2", "duration_ms": 0.4},
+    {"name": "headroom", "ok": false, "detail": "used_clients 7 of max_client_conn 10 (70%) is at or above 50%", "duration_ms": 0.8},
+    {"name": "databases", "ok": true, "detail": "2 databases ok", "duration_ms": 0.5}
+  ]
+}
+```
+
+Probes are bounded by the request timeout, even if PGBouncer never answers.
+
+**Things to know before enabling `pools` or `backend`:**
+- **A database-wide problem fails readiness on every instance at once.**
+  Kubernetes then removes all endpoints, and an AWS NLB sends traffic to all
+  targets anyway ("fails open"). That's why these checks are off by default.
+  Use `READY_DATABASES` so that one tenant's database can't take a shared
+  PGBouncer out of service.
+- **While the database is unreachable, PGBouncer keeps each abandoned
+  `backend` probe waiting** until its `query_wait_timeout` (120s by default),
+  and each one holds a `max_client_conn` slot. `BACKEND_FAILURE_BACKOFF`
+  limits this to one attempt per backoff period. Consider lowering
+  `query_wait_timeout` as well.
 
 ## PGBouncer Information Endpoints
 
