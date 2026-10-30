@@ -35,8 +35,8 @@ func initServer() *http.Server {
 		log.Print("Enabling Debug Endpoints")
 		addDebugHandlers(router)
 	}
-	// Handlers time out after 10s (see makeRequestHandlerWithContext), so
-	// WriteTimeout must be longer than that.
+	// Handlers time out after requestTimeout (10s), so WriteTimeout must be
+	// longer than that.
 	return &http.Server{
 		Handler:           router,
 		Addr:              fmt.Sprintf(":%d", config.Port),

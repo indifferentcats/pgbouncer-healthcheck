@@ -13,12 +13,15 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
+// requestTimeout bounds each request's PGBouncer query or port probe
+var requestTimeout = 10 * time.Second
+
 type requestHandlerWithContext func(context.Context, http.ResponseWriter, httprouter.Params) error
 type requestHandler func(http.ResponseWriter, httprouter.Params) error
 
 func makeRequestHandlerWithContext(h requestHandlerWithContext) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 		defer cancel()
 		err := h(ctx, w, ps)
 		if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -35,11 +37,11 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 // statusFixtures answers every SHOW command used by /status/* with one row.
 func statusFixtures() map[string]fakeResult {
 	return map[string]fakeResult{
-		"SHOW USERS":     {columns: []string{"name", "pool_size", "pool_mode"}, rows: [][]driver.Value{{"dd-agent", "", nil}}},
+		"SHOW USERS":     {columns: []string{"name", "pool_size", "pool_mode"}, rows: [][]driver.Value{{"stats", "", nil}}},
 		"SHOW CONFIG":    {columns: []string{"key", "value", "default", "changeable"}, rows: [][]driver.Value{{"listen_port", "6543", "6432", "no"}}},
 		"SHOW DATABASES": {columns: []string{"name", "host", "port", "pool_size"}, rows: [][]driver.Value{{"dummy", "10.0.0.1", int64(5432), int64(100)}}},
 		"SHOW POOLS":     {columns: []string{"database", "user", "cl_active", "pool_mode"}, rows: [][]driver.Value{{"pgbouncer", "pgbouncer", int64(1), nil}}},
-		"SHOW CLIENTS":   {columns: []string{"type", "user", "port"}, rows: [][]driver.Value{{"C", "dd-agent", int64(5000)}}},
+		"SHOW CLIENTS":   {columns: []string{"type", "user", "port"}, rows: [][]driver.Value{{"C", "stats", int64(5000)}}},
 		"SHOW SERVERS":   {columns: []string{"type", "user", "port"}, rows: [][]driver.Value{{"S", "app", int64(5432)}}},
 		"SHOW MEM":       {columns: []string{"name", "size", "used", "free", "memtotal"}, rows: [][]driver.Value{{"user_cache", int64(1), int64(2), int64(3), int64(4)}}},
 		// lib/pq returns []byte for numeric columns
@@ -50,7 +52,7 @@ func statusFixtures() map[string]fakeResult {
 var statusChecks = []struct {
 	path, key, want string
 }{
-	{"/status/users", "name", "dd-agent"},
+	{"/status/users", "name", "stats"},
 	{"/status/configs", "key", "listen_port"},
 	{"/status/databases", "name", "dummy"},
 	{"/status/pools", "database", "pgbouncer"},
@@ -232,5 +234,33 @@ func TestStatusJSONTypes(t *testing.T) {
 		if !ok || got != tt.want {
 			t.Errorf("%s %s = %#v (present %v), want %#v", tt.path, tt.key, got, ok, tt.want)
 		}
+	}
+}
+
+// A handler that outlives requestTimeout must fail with a 500 rather than hang
+// (previously only covered by an integration test).
+func TestRequestTimeout(t *testing.T) {
+	old := requestTimeout
+	requestTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { requestTimeout = old })
+
+	router := httprouter.New()
+	router.GET("/slow", makeRequestHandlerWithContext(
+		func(ctx context.Context, _ http.ResponseWriter, _ httprouter.Params) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+				return nil
+			}
+		}))
+
+	start := time.Now()
+	rec := get(t, router, "/slow")
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "deadline exceeded") {
+		t.Errorf("status %d body %q, want 500 deadline exceeded", rec.Code, rec.Body)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("request took %s, timeout not applied", elapsed)
 	}
 }

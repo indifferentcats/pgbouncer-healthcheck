@@ -8,6 +8,39 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### ⚠️ Breaking changes
 
+#### `CHECK_DDAGENT` removed: `/health` no longer checks the Datadog agent
+
+`CHECK_DDAGENT=1` made `/health` also run `sudo -n datadog-agent health`, so a
+host with a broken Datadog agent was reported unhealthy. That check has been
+removed, along with its `sudo` dependency:
+
+- It cannot work in the minimal containers this binary now targets: they have
+  neither `sudo` nor the `datadog-agent` binary, so `/health` would always fail.
+- It coupled PGBouncer's health to the monitoring agent's health. Under a load
+  balancer or orchestrator, a broken agent would take healthy PGBouncer
+  instances out of service, turning a monitoring problem into a database
+  outage.
+
+**The variable is now ignored, without an error.** If you still set
+`CHECK_DDAGENT=1`, `/health` silently stops checking the agent, so put a
+replacement in place before upgrading.
+
+**What to do instead:** monitor the Datadog agent through its own health
+check, separately from PGBouncer:
+
+- **Containers (ECS, Kubernetes):** give the agent container its own liveness
+  and readiness probes on the agent's health endpoints, `GET /live` and
+  `GET /ready`. They are served on the agent's `health_port` (`DD_HEALTH_PORT`),
+  which the official Datadog agent image and Helm chart set to `5555`.
+- **Hosts (EC2):** run `datadog-agent health` from your host monitoring or
+  instance health tooling, or enable `health_port` in `datadog.yaml` and probe
+  `http://localhost:<port>/ready`.
+- If you still want "no agent, no traffic", alert on agent health (for example
+  a Datadog monitor on the `datadog.agent.running` metric or the agent's
+  service check) rather than failing PGBouncer's health check.
+
+#### `/status/*` JSON model
+
 The JSON returned by every `/status/*` endpoint has changed. Previously,
 `SHOW …` results were scanned by column position into fixed structs, which
 broke on any PGBouncer newer than ~1.8 (enhanced health checks and most
@@ -58,6 +91,8 @@ Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
 - Error responses: "occured" typo fixed to "occurred". `lib/pq` errors now
   include the SQLSTATE code.
 - HTTP server now has read/write/idle timeouts.
+- `sudo` is no longer used, and has been removed from the test image. The
+  integration test PGBouncer stats user is renamed from `dd-agent` to `stats`.
 - The "Connected to PGBouncer database" log line is only printed after a
   successful query.
 - CI: CircleCI uses Task and a current remote Docker; CodeQL actions updated.
@@ -71,13 +106,14 @@ Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
 - Port probe ignored its `port` argument.
 - Enhanced health check panicked if the database handle could not be created.
 - Port probe now honours the request timeout.
-- Test stub for a hanging Datadog agent overwrote its own shebang.
 
 ### Added
 
 - Integration tests covering the JSON shape of every `/status/*` endpoint.
 - Go unit tests for the scanner and all HTTP handlers, using a fake
-  `database/sql` driver (`task test:unit`, `task coverage`).
+  `database/sql` driver (`task test:unit`, `task coverage`). These include the
+  10-second request timeout, which was previously only tested through the
+  removed Datadog check.
 - GitHub Actions workflows: build and integration tests on native amd64 and
   arm64 runners, and unit tests with coverage. README badges show build, unit
   test, coverage and CodeQL status.

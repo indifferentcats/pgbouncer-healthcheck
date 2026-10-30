@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os/exec"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -32,9 +31,6 @@ func handleHealth(ctx context.Context, w http.ResponseWriter, _ httprouter.Param
 			return fmt.Errorf("PGbouncer port probe check failed: %w", err)
 		}
 	}
-	if config.CheckDDAgent {
-		return getAgentHealth(ctx)
-	}
 	return nil
 }
 
@@ -45,13 +41,4 @@ func probeLocalPort(ctx context.Context, port int) error {
 		conn.Close()
 	}
 	return err
-}
-
-func getAgentHealth(ctx context.Context) error {
-	psCmd := exec.CommandContext(ctx, "sudo", "-n", "datadog-agent", "health")
-	err := psCmd.Run()
-	if err != nil {
-		return fmt.Errorf("Datadog agent health command failed: %w", err)
-	}
-	return nil
 }

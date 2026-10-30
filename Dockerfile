@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 FROM ${ALPINE_IMAGE} AS test
 
 # Newer pgbouncer packages no longer create a pgbouncer user
-RUN apk add --no-cache pgbouncer bash curl jq sudo && \
+RUN apk add --no-cache pgbouncer bash curl jq && \
     adduser -S -D -H pgbouncer && \
     mkdir -p /var/run/postgresql && \
     chown pgbouncer /var/run/postgresql

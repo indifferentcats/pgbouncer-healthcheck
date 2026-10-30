@@ -1,2 +1,1 @@
-"dd-agent" "md5a5c4e3204156a17079057d82bcd0885a"
-
+"stats" "md5ebd881f916a85a8355f768f940fe9421"

@@ -9,13 +9,13 @@
 
 This implements a http `/health` check for PGBouncer hosts.
 This healthcheck provides a simple yes/no health response based
-on attempting to connect to PGBouncer and execute a request, as
-well as checking the Datadog agent.
+on attempting to connect to PGBouncer and execute a request.
 
 There are also several endpoints used for diagnostics.
 
-> **Upgrading from 2.x?** Version 3.0 changes the JSON returned by every
-> `/status/*` endpoint. See [Upgrading from 2.x](#upgrading-from-2x) and the
+> **Upgrading from 2.x?** Version 3.0 removes the Datadog agent check
+> (`CHECK_DDAGENT`) and changes the JSON returned by every `/status/*`
+> endpoint. See [Upgrading from 2.x](#upgrading-from-2x) and the
 > [CHANGELOG](CHANGELOG.md).
 
 ## Building and running
@@ -45,9 +45,9 @@ COPY pgbouncer-healthcheck /pgbouncer-healthcheck
 ENTRYPOINT ["/pgbouncer-healthcheck"]
 ```
 
-Note that `CHECK_DDAGENT`, `/ami-version` and the `/debug/*` endpoints run
-external commands or read host files (`sudo`, `datadog-agent`, `dmesg`, `ps`,
-`journalctl`, `/etc/ami_version`), which are not present in a `scratch` image.
+Note that `/ami-version` and the `/debug/*` endpoints run external commands
+or read host files (`dmesg`, `ps`, `journalctl`, `/etc/ami_version`), which
+are not present in a `scratch` image.
 The `/health` port probe and enhanced check, and all `/status/*` endpoints,
 work without them.
 
@@ -93,8 +93,6 @@ The intention is that the username and password will be supplied by setting the
 - `PORT`: The TCP port the daemon should use to listen for HTTP connections (default: 8000)
 - `ENHANCED_CHECK`: If true, test the PGBouncer health by connecting and sending a query.
     If false, use a simple port probe. (default: false)
-- `CHECK_DDAGENT`: If true, the `/health` endpoint will also run `datadog-agent health` and
-    the return value will affect the health status (default: false)
 - `PGBOUNCER_PORT`: The TCP port used if using the basic port probe healthcheck (default: 6543)
 - `ENABLE_DEBUG_ENDPOINTS`: If true, the extra `/debug/` endpoints will be enabled. See below (default: false)
 
@@ -113,7 +111,6 @@ This always returns a `200 OK`
 ### /health
 The healthcheck returns a 200 OK response or a `500 Internal Server Error` response.
 It will probe the PGBouncer using a method depending on  `ENHANCED_CHECK`.
-If `CHECK_DDAGENT` is true it will also check the Datadog Agent.
 
 ## PGBouncer Information Endpoints
 
@@ -132,7 +129,7 @@ Returns the results of PGBouncer's `SHOW USERS` command.
 ```json
 [
   {
-    "name": "dd-agent",
+    "name": "stats",
     "pool_size": null,
     "reserve_pool_size": null,
     "pool_mode": null,
@@ -233,7 +230,7 @@ Returns the results of PGBouncer's `SHOW CLIENTS` command.
 [
   {
     "type": "C",
-    "user": "dd-agent",
+    "user": "stats",
     "database": "pgbouncer",
     "replication": "none",
     "state": "idle",
@@ -335,7 +332,15 @@ Returns the output of `journalctl --reverse -b --no-pager -n 50`
 
 ## Upgrading from 2.x
 
-3.0 is a breaking release for consumers of the `/status/*` JSON:
+3.0 is a breaking release in two ways.
+
+**The Datadog agent check (`CHECK_DDAGENT`) is removed.** The variable is now
+silently ignored, so `/health` no longer reflects the agent's health. Monitor
+the agent through its own health check instead, such as container liveness and
+readiness probes on the agent's `/live` and `/ready` endpoints, or
+`datadog-agent health` on hosts. See the [CHANGELOG](CHANGELOG.md) for details.
+
+**The `/status/*` JSON has changed:**
 
 1. **All keys are now snake_case PGBouncer column names** instead of Go field
    names (`"PoolMode"` → `"pool_mode"`, `"ClActive"` → `"cl_active"`, …).
@@ -351,7 +356,7 @@ Returns the output of `journalctl --reverse -b --no-pager -n 50`
 
 The full old → new field mapping is in the [CHANGELOG](CHANGELOG.md).
 
-Nothing changes for `/health`, `/`, `/ami-version` or `/debug/*`, or for
-configuration environment variables. The binary is published to S3 under the
+Apart from `CHECK_DDAGENT`, nothing changes for `/health`, `/`,
+`/ami-version` or `/debug/*`, or for configuration environment variables. The binary is published to S3 under the
 new version (`pgbouncer-healthcheck-3.0`); existing consumers of
 `pgbouncer-healthcheck-2.0` are unaffected until they switch.

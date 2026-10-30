@@ -48,9 +48,6 @@ else
    curl_opts=("--silent" "--output" "/dev/null" "--write-out" "%{http_code}")
 fi
 
-# Location to put fake datadog-agent binary
-DDAGENT_FAKE=/usr/bin/datadog-agent
-
 # Succeeds only if the request completed with a non-error HTTP status. A
 # connection failure (curl exits non-zero) counts as an error.
 _curl() {
@@ -79,7 +76,7 @@ wait_for_port() {
 }
 
 init_creds() {
-    export PGUSER="dd-agent"
+    export PGUSER="stats"
     export PGPASSWORD="3c5c04a7-c21a-480f-bc42-30a1e0550fbc"
 }
 
@@ -215,7 +212,7 @@ test_json_endpoint() {
 # Requires PGBouncer running and stats-user credentials (init_creds).
 test_all_status_json() {
     test_json_endpoint /status/users "Status users" \
-        'type == "array" and any(.[]; .name == "dd-agent" and (.max_user_connections | type) == "number")'
+        'type == "array" and any(.[]; .name == "stats" and (.max_user_connections | type) == "number")'
     test_json_endpoint /status/configs "Status configs" \
         'type == "array" and any(.[]; .key == "listen_port" and .value == "6543")
          and all(.[]; (.changeable | type) == "boolean")'
@@ -225,7 +222,7 @@ test_all_status_json() {
     test_json_endpoint /status/pools "Status pools" \
         'type == "array" and any(.[]; .database == "pgbouncer" and (.cl_active | type) == "number")'
     test_json_endpoint /status/clients "Status clients" \
-        'type == "array" and any(.[]; .user == "dd-agent" and .database == "pgbouncer" and (.port | type) == "number")'
+        'type == "array" and any(.[]; .user == "stats" and .database == "pgbouncer" and (.port | type) == "number")'
     # No backend Postgres in the test environment, so there are no servers
     test_json_endpoint /status/servers "Status servers" \
         '. == []'
@@ -233,22 +230,6 @@ test_all_status_json() {
         'type == "array" and length > 0 and all(.[]; (.name | type) == "string" and (.memtotal | type) == "number")'
     test_json_endpoint /status/stats "Status stats" \
         'type == "array" and any(.[]; .database == "pgbouncer" and (.total_query_count | type) == "number")'
-}
-
-make_dd_stub_hang() {
-    printf '#!/bin/sh\n' >"$DDAGENT_FAKE"
-    printf 'sleep 1000000\n' >>"$DDAGENT_FAKE"
-    chmod 755 "$DDAGENT_FAKE"
-}
-
-make_dd_stub_pass() {
-    printf '#!/bin/true\n' >"$DDAGENT_FAKE"
-    chmod 755 "$DDAGENT_FAKE"
-}
-
-make_dd_stub_fail() {
-    printf '#!/bin/false\n' >"$DDAGENT_FAKE"
-    chmod 755 "$DDAGENT_FAKE"
 }
 
 summary() {
