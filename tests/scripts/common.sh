@@ -80,11 +80,60 @@ init_creds() {
     export PGPASSWORD="3c5c04a7-c21a-480f-bc42-30a1e0550fbc"
 }
 
+# Test-only credentials; their SCRAM secrets are in tests/userlist.txt
+ADMIN_PASSWORD="2b72c91b22a9e7b54f9750ee95ae2841"
+APP_PASSWORD="77b475f9cb0ddf4d8ce0b45c560c92ae"
+
+# Run a command on the PGBouncer admin console as the admin user
+admin_psql() {
+    PGUSER=admin PGPASSWORD="$ADMIN_PASSWORD" psql -h 127.0.0.1 -p 6543 pgbouncer -AXtq -c "$1"
+}
+
+# Run SQL through PGBouncer on the real "app" database
+app_psql() {
+    PGUSER=app PGPASSWORD="$APP_PASSWORD" psql -h 127.0.0.1 -p 6543 app -AXtq -c "$1"
+}
+
+PGDATA=/var/lib/postgresql/data
+
+start_postgres() {
+    info "Starting Postgres"
+    su postgres -c "pg_ctl -D $PGDATA -w -l /tmp/postgres.log start" >/dev/null ||
+        fatal "Postgres did not start: $(cat /tmp/postgres.log)"
+}
+
+stop_postgres() {
+    info "Stopping Postgres"
+    su postgres -c "pg_ctl -D $PGDATA -w -m fast stop" >/dev/null
+}
+
+# hold_clients N: open N idle client connections to PGBouncer
+hold_clients() {
+    held_pids=()
+    for _ in $(seq "$1"); do
+        (sleep 60) | psql -h 127.0.0.1 -p 6543 dummy -q >/dev/null 2>&1 &
+        held_pids+=($!)
+    done
+    sleep 1
+}
+
+release_clients() {
+    kill "${held_pids[@]}" 2>/dev/null
+    wait "${held_pids[@]}" 2>/dev/null
+    sleep 1
+}
+
 start_healthcheck() {
     info "Starting Healthcheck process"
     /usr/local/bin/pgbouncer-healthcheck &
     health_pid=$!
     wait_for_port 8000 "Healthcheck"
+}
+
+stop_healthcheck() {
+    info "Stopping Healthcheck process"
+    kill "$health_pid"
+    wait "$health_pid" 2>/dev/null
 }
 
 start_pgbouncer() {
@@ -230,6 +279,33 @@ test_all_status_json() {
         'type == "array" and length > 0 and all(.[]; (.name | type) == "string" and (.memtotal | type) == "number")'
     test_json_endpoint /status/stats "Status stats" \
         'type == "array" and any(.[]; .database == "pgbouncer" and (.total_query_count | type) == "number")'
+}
+
+# expect_health PATH HTTP_CODE [CHECK=true|false ...]
+# Passes if PATH returns HTTP_CODE and each named check has that ok value.
+expect_health() {
+    path=$1
+    want_code=$2
+    shift 2
+    body=$(curl --silent --write-out '\n%{http_code}' "localhost:8000$path")
+    code=${body##*$'\n'}
+    body=${body%$'\n'*}
+    if [[ $VERBOSE -gt 0 ]]; then
+        echo "$body" >&2
+    fi
+    ok=1
+    [[ $code == "$want_code" ]] || ok=0
+    for expectation in "$@"; do
+        name=${expectation%%=*}
+        want=${expectation#*=}
+        got=$(jq -r --arg n "$name" '.checks[] | select(.name == $n) | .ok' <<<"$body" 2>/dev/null)
+        [[ $got == "$want" ]] || ok=0
+    done
+    if ((ok)); then
+        pass "$path returned $code${*:+ with $*}"
+    else
+        fail "$path returned $code, want $want_code${*:+ with $*}: ${body:0:400}"
+    fi
 }
 
 summary() {

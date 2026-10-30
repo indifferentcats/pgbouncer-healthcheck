@@ -29,14 +29,17 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # Integration test image: real PGBouncer plus the test scripts
 FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS test
 
-# Newer pgbouncer packages no longer create a pgbouncer user
-RUN apk add --no-cache pgbouncer bash curl jq && \
+# Newer pgbouncer packages no longer create a pgbouncer user. Postgres and
+# its client are for the readiness tests against a real backend.
+RUN apk add --no-cache pgbouncer bash curl jq postgresql18 postgresql18-client openssl && \
     adduser -S -D -H pgbouncer && \
     mkdir -p /var/run/postgresql && \
     chown pgbouncer /var/run/postgresql
 
 COPY tests/pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
 COPY tests/userlist.txt /etc/pgbouncer/userlist.txt
+COPY --chmod=755 tests/postgres-init.sh /usr/local/bin/postgres-init.sh
+RUN /usr/local/bin/postgres-init.sh
 COPY --chmod=755 tests/scripts /tests
 COPY --from=build /out/pgbouncer-healthcheck /usr/local/bin/pgbouncer-healthcheck
 

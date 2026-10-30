@@ -14,9 +14,8 @@ name: "CodeQL"
 on:
   push:
     branches: ["master"]
+  # All PRs, including ones stacked on other feature branches
   pull_request:
-    # The branches below must be a subset of the branches above
-    branches: ["master"]
   schedule:
     - cron: "44 22 * * 3"
 

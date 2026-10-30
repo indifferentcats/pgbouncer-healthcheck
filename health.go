@@ -11,9 +11,19 @@ import (
 )
 
 func addHealthHandlers(router *httprouter.Router) {
-	router.GET("/health", makeRequestHandlerWithContext(handleHealth))
+	addLiveReadyHandlers(router)
+	switch config.HealthMode {
+	case "live":
+		router.GET("/health", makeRequestHandlerWithContext(reportHandler(liveProbe)))
+	case "ready":
+		router.GET("/health", makeRequestHandlerWithContext(reportHandler(readyProbe)))
+	default: // legacy
+		router.GET("/health", makeRequestHandlerWithContext(handleHealth))
+	}
 }
 
+// handleHealth is the legacy /health check: a port probe, or SHOW USERS
+// with ENHANCED_CHECK.
 func handleHealth(ctx context.Context, w http.ResponseWriter, _ httprouter.Params) error {
 	// This is a blind yes/no response
 	var err error

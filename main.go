@@ -3,15 +3,16 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
-	"github.com/kelseyhightower/envconfig"
 	_ "github.com/lib/pq"
 )
 
@@ -49,6 +50,16 @@ func initServer() *http.Server {
 
 func initDB() {
 	var err error
+	if probeDB, err = openProbeDB(config.Connstr); err != nil {
+		probeDB = nil
+	}
+	if config.BackendConnstr != "" {
+		if backendDB, err = openProbeDB(config.BackendConnstr); err != nil {
+			backendDB = nil
+			log.Printf("Could not open backend database: %s", err)
+		}
+	}
+
 	db, err = sql.Open("postgres", config.Connstr)
 	if err != nil {
 		db = nil
@@ -70,24 +81,20 @@ func initDB() {
 	log.Printf("Connected to PGBouncer database")
 }
 
-func version() {
-	fmt.Fprintf(os.Stderr, "%s version %s\n", os.Args[0], VERSION)
-	fmt.Fprintf(os.Stderr, "built %s\n", BUILD_DATE)
+func version(w io.Writer) {
+	fmt.Fprintf(w, "%s version %s\n", os.Args[0], VERSION)
+	fmt.Fprintf(w, "built %s\n", BUILD_DATE)
 }
 
 func main() {
-	if err := envconfig.Process("", &config); err != nil {
-		log.Fatalf("Could not process configuration: %s", err)
+	var err error
+	config, err = loadConfig(os.Args[1:], os.Stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		os.Exit(0)
 	}
-	flag.Usage = func() {
-		version()
-		fmt.Fprintln(os.Stderr, "\nUsage:")
-		flag.PrintDefaults()
-		if err := envconfig.Usage("", &config); err != nil {
-			log.Fatalf("Could not process configuration: %s", err)
-		}
+	if err != nil {
+		log.Fatalf("Invalid configuration: %s", err)
 	}
-	flag.Parse()
 	initDB()
 	webserver := initServer()
 	log.Printf("Listening on port %d", config.Port)

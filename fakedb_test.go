@@ -19,6 +19,7 @@ type fakeResult struct {
 	columns []string
 	rows    [][]driver.Value
 	err     error
+	calls   *atomic.Int64 // optional: counts queries
 }
 
 var (
@@ -71,6 +72,9 @@ func (c *fakeConn) QueryContext(_ context.Context, query string, _ []driver.Name
 	res, ok := c.results[query]
 	if !ok {
 		return nil, fmt.Errorf("unexpected query %q", query)
+	}
+	if res.calls != nil {
+		res.calls.Add(1)
 	}
 	if res.err != nil {
 		return nil, res.err

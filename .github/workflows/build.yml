@@ -3,8 +3,8 @@ name: Build
 on:
   push:
     branches: ["master"]
+  # All PRs, including ones stacked on other feature branches
   pull_request:
-    branches: ["master"]
 
 permissions:
   contents: read

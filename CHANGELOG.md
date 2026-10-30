@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.1] - Unreleased
+
+### Added
+
+- `/health/live` (liveness) and `/health/ready` (readiness), returning `200`
+  or `503` with a JSON report of each check (#2). The legacy `/health` could
+  report healthy while PGBouncer was rejecting every new client, for example
+  at `max_client_conn`.
+  - `/health/live` checks only that the admin console answers, never the
+    databases.
+  - `/health/ready` logs in fresh on every probe and runs the configured
+    checks: `headroom` (client connections vs `max_client_conn`) and
+    `databases` (none paused or disabled) by default; `pools` (`maxwait`,
+    `cl_waiting`) and `backend` (`SELECT 1` through PGBouncer) are opt-in and
+    can be limited to named databases.
+  - Results are cached briefly (`CHECK_CACHE_TTL`) so several probers don't
+    flood the admin console, and probe connections have an I/O deadline so a
+    probe can't hang.
+  - After a failed `backend` check it isn't retried for
+    `BACKEND_FAILURE_BACKOFF`, because PGBouncer holds each abandoned probe
+    client until `query_wait_timeout` while the database is down.
+- `HEALTH_MODE` selects what `/health` does: `legacy` (the default,
+  unchanged), `live` or `ready`.
+- Command-line flags for every option, mirroring the environment variables;
+  flags take precedence (`-h` lists them).
+- The integration test image includes a real Postgres 18, with TLS and SCRAM
+  passed through by PGBouncer, which covers the backend and pools checks and
+  real `/status/servers` rows.
+
+### Changed
+
+- Invalid configuration (unknown checks, bad durations, an unknown health
+  mode) now stops startup with an error.
+
 ## [3.0] - Unreleased
 
 ### ⚠️ Breaking changes
