@@ -103,6 +103,11 @@ only opens pull requests. Nothing auto-merges them**: the repository's
 auto-merge setting is off, no workflow merges PRs, and every update needs a
 person to review and merge it. The owner is requested as a reviewer through
 `.github/CODEOWNERS` and assigned to each PR, which sends notification emails.
+Branch protection on `master` enforces this. Merging needs an approving
+review from the code owner, plus passing Build (amd64 and arm64), Unit tests,
+CodeQL and Security checks, all reported by GitHub Actions. Approvals are
+dismissed when new commits are pushed, and force-pushes and branch deletion
+are blocked.
 
 Dependabot doesn't update these, so bump them by hand:
 - the `golang:<version>-trixie@sha256:` image in the workflows' `container:`
