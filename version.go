@@ -1,10 +1,10 @@
 package main
 
 // The values here are placeholders
-// that are replaced by the build script
+// that are set at build time via -ldflags -X
 // Do not modify
 
-const (
-	VERSION    = "2.0"
-	BUILD_DATE = "2019-01-18 08:57"
+var (
+	VERSION    = "dev"
+	BUILD_DATE = "unknown"
 )

@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os/exec"
 
 	"github.com/julienschmidt/httprouter"
-	"github.com/pkg/errors"
 )
 
 func addHealthHandlers(router *httprouter.Router) {
@@ -19,14 +19,17 @@ func handleHealth(ctx context.Context, w http.ResponseWriter, _ httprouter.Param
 	// This is a blind yes/no response
 	var err error
 	if config.EnhancedCheck {
+		if db == nil {
+			return errors.New("PGbouncer enhanced health check failed: PGBouncer Database is not connected")
+		}
 		_, err = getUsers(ctx, db)
 		if err != nil {
-			return errors.Wrap(err, "PGbouncer enhanced health check failed")
+			return fmt.Errorf("PGbouncer enhanced health check failed: %w", err)
 		}
 	} else {
-		err = probeLocalPort(config.PGBouncerPort)
+		err = probeLocalPort(ctx, config.PGBouncerPort)
 		if err != nil {
-			return errors.Wrap(err, "PGbouncer port probe check failed")
+			return fmt.Errorf("PGbouncer port probe check failed: %w", err)
 		}
 	}
 	if config.CheckDDAgent {
@@ -35,8 +38,9 @@ func handleHealth(ctx context.Context, w http.ResponseWriter, _ httprouter.Param
 	return nil
 }
 
-func probeLocalPort(port int) error {
-	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", config.PGBouncerPort))
+func probeLocalPort(ctx context.Context, port int) error {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf(":%d", port))
 	if err == nil {
 		conn.Close()
 	}
@@ -47,7 +51,7 @@ func getAgentHealth(ctx context.Context) error {
 	psCmd := exec.CommandContext(ctx, "sudo", "-n", "datadog-agent", "health")
 	err := psCmd.Run()
 	if err != nil {
-		return errors.Wrap(err, "Datadog agent health command failed")
+		return fmt.Errorf("Datadog agent health command failed: %w", err)
 	}
 	return nil
 }

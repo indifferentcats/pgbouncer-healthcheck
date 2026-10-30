@@ -9,15 +9,51 @@ well as checking the Datadog agent.
 
 There are also several endpoints used for diagnostics.
 
+> **Upgrading from 2.x?** Version 3.0 changes the JSON returned by every
+> `/status/*` endpoint. See [Upgrading from 2.x](#upgrading-from-2x) and the
+> [CHANGELOG](CHANGELOG.md).
+
 ## Building and running
 
-This can be built on a local system with docker using the provided `Makefile`.
+Builds and tests run in containers, driven by [Task](https://taskfile.dev).
+You need `task` and either Podman (default) or Docker. A local Go toolchain is
+only needed for `task vet` / `task tidy`.
 
-    $ make build
+    $ task build                  # static binary for the host arch, in dist/linux-<arch>/
+    $ task build ARCH=amd64       # release (x86-64) binary
+    $ task test                   # integration tests against a real PGBouncer
+    $ task test -- enhanced.sh    # run a subset of test scripts
+    $ task image                  # minimal FROM-scratch runtime image
+    $ task --list                 # everything else
 
-You can then run the server binary
+Use Docker instead of Podman with `CONTAINER_TOOL=docker`, e.g.
+`task build CONTAINER_TOOL=docker`.
+
+The binary is fully statically linked (`CGO_ENABLED=0`) with no runtime
+dependencies, so it can be copied into a very slim container, e.g.:
+
+```dockerfile
+FROM scratch
+COPY pgbouncer-healthcheck /pgbouncer-healthcheck
+ENTRYPOINT ["/pgbouncer-healthcheck"]
+```
+
+Note that `CHECK_DDAGENT`, `/ami-version` and the `/debug/*` endpoints run
+external commands or read host files (`sudo`, `datadog-agent`, `dmesg`, `ps`,
+`journalctl`, `/etc/ami_version`), which are not present in a `scratch` image.
+The `/health` port probe and enhanced check, and all `/status/*` endpoints,
+work without them.
+
+Run the binary with:
 
     $ ./pgbouncer-healthcheck
+
+### Supply-chain pinning
+
+Build inputs are pinned: Go modules via `go.sum`, base images in the
+`Dockerfile` by digest, GitHub Actions by commit SHA, and the CI's go-task
+download by SHA-256. When bumping any of them, update the version and the
+hash together.
 
 ## Configuration
 
@@ -47,7 +83,7 @@ on the localhost to test if PGBouncer is alive.
 
 ## Main Endpoints
 
-Note: See https://pgbouncer.github.io/usage.html for details of the PGBouncer
+Note: See https://www.pgbouncer.org/usage.html for details of the PGBouncer
 `SHOW` command outputs.
 
 ### /
@@ -61,69 +97,50 @@ If `CHECK_DDAGENT` is true it will also check the Datadog Agent.
 
 ## PGBouncer Information Endpoints
 
-### /status/users
-Returns the results of PGBouncer's `SHOW USERS` command formatted as JSON.
+Each endpoint returns the matching PGBouncer `SHOW` command as a JSON array.
+Keys are the PGBouncer column names. Columns are matched by name, so columns
+added in newer PGBouncer versions are ignored, and fields for columns an older
+PGBouncer doesn't return are left at their zero value. Nullable columns are
+returned as `null`. An empty result is `[]`.
 
-Example:
+The examples below are from PGBouncer 1.25.
+
+### /status/users
+
+Returns the results of PGBouncer's `SHOW USERS` command.
 
 ```json
 [
   {
-    "Name": "dd-agent",
-    "PoolMode": null
-  },
-  {
-    "Name": "jasoirwjofjdsslkmcknmwofn",
-    "PoolMode": null
-  },
-  {
-    "Name": "pgbouncer",
-    "PoolMode": null
-  },
-  {
-    "Name": "sidekiq_realtime",
-    "PoolMode": null
+    "name": "dd-agent",
+    "pool_size": null,
+    "reserve_pool_size": null,
+    "pool_mode": null,
+    "max_user_connections": 0,
+    "current_connections": 0,
+    "max_user_client_connections": 0,
+    "current_client_connections": 1
   }
 ]
 ```
 
 ### /status/configs
 
-Returns the results of PGBouncer's `SHOW CONFIG` command formatted as JSON.
-
-Example:
+Returns the results of PGBouncer's `SHOW CONFIG` command. `changeable` is a boolean.
 
 ```json
 [
   {
-    "Key": "job_name",
-    "Value": "pgbouncer",
-    "Changeable": false
+    "key": "listen_port",
+    "value": "6543",
+    "default": "6432",
+    "changeable": false
   },
   {
-    "Key": "conffile",
-    "Value": "/etc/pgbouncer/pgbouncer.ini",
-    "Changeable": true
-  },
-  {
-    "Key": "logfile",
-    "Value": "",
-    "Changeable": true
-  },
-  {
-    "Key": "pidfile",
-    "Value": "/var/run/postgresql/pgbouncer.pid",
-    "Changeable": false
-  },
-  {
-    "Key": "listen_addr",
-    "Value": "0.0.0.0",
-    "Changeable": false
-  },
-  {
-    "Key": "listen_port",
-    "Value": "6543",
-    "Changeable": false
+    "key": "pool_mode",
+    "value": "transaction",
+    "default": "session",
+    "changeable": true
   }
 ]
 ```
@@ -131,245 +148,155 @@ Example:
 
 ### /status/databases
 
-Returns the results of PGBouncer's `SHOW DATABASES` command formatted as JSON.
+Returns the results of PGBouncer's `SHOW DATABASES` command.
 This is essentially the content of the `[databases]` section in the config file.
-
-Example:
 
 ```json
 [
   {
-    "Name": "delivery_prod",
-    "Host": "roo-prod-96.example.eu-west-1.rds.amazonaws.com",
-    "Port": "12345",
-    "Database": "prod",
-    "ForceUser": null,
-    "PoolSize": 100,
-    "ReservePool": 1,
-    "PoolMode": null,
-    "MaxConnections": 0,
-    "CurrentConnections": 0
-  },
-  {
-    "Name": "delivery_prod_read1",
-    "Host": "roo-prod-96-read1.example.eu-west-1.rds.amazonaws.com",
-    "Port": "12345",
-    "Database": "prod",
-    "ForceUser": null,
-    "PoolSize": 100,
-    "ReservePool": 1,
-    "PoolMode": null,
-    "MaxConnections": 0,
-    "CurrentConnections": 0
+    "name": "dummy",
+    "host": "10.0.0.1",
+    "port": 5432,
+    "database": "dummy",
+    "force_user": null,
+    "pool_size": 100,
+    "min_pool_size": 0,
+    "reserve_pool_size": 1,
+    "server_lifetime": 3600,
+    "pool_mode": null,
+    "load_balance_hosts": null,
+    "max_connections": 0,
+    "current_connections": 0,
+    "max_client_connections": 0,
+    "current_client_connections": 0,
+    "paused": 0,
+    "disabled": 0
   }
 ]
 ```
 
 ### /status/pools
 
-Returns the results of PGBouncer's `SHOW POOLS` command formatted as JSON.
+Returns the results of PGBouncer's `SHOW POOLS` command.
 This is similar to `SHOW DATABASES`, except it's a product of that set by
 the users, since the pooling is per user per logical DB.
-
-Example:
 
 ```json
 [
   {
-    "Database": "prod_read1_web",
-    "User": "kldfwokoekrokerkreo",
-    "ClActive": 459,
-    "ClWaiting": 0,
-    "SvActive": 2,
-    "SvIdle": 5,
-    "SvUsed": 0,
-    "SvTested": 0,
-    "SvLogin": 0,
-    "MaxWait": 0,
-    "PoolMode": "transaction"
-  },
-  {
-    "Database": "prod_read1_worker",
-    "User": "kldfwokoekrokerkreo",
-    "ClActive": 127,
-    "ClWaiting": 0,
-    "SvActive": 0,
-    "SvIdle": 4,
-    "SvUsed": 0,
-    "SvTested": 0,
-    "SvLogin": 0,
-    "MaxWait": 0,
-    "PoolMode": "transaction"
+    "database": "pgbouncer",
+    "user": "pgbouncer",
+    "cl_active": 1,
+    "cl_waiting": 0,
+    "cl_active_cancel_req": 0,
+    "cl_waiting_cancel_req": 0,
+    "sv_active": 0,
+    "sv_active_cancel": 0,
+    "sv_being_canceled": 0,
+    "sv_idle": 0,
+    "sv_used": 0,
+    "sv_tested": 0,
+    "sv_login": 0,
+    "maxwait": 0,
+    "maxwait_us": 0,
+    "pool_mode": "statement",
+    "load_balance_hosts": null
   }
 ]
 ```
 
 ### /status/clients
 
-Returns the results of PGBouncer's `SHOW CLIENTS` command formatted as JSON.
-
-Example:
+Returns the results of PGBouncer's `SHOW CLIENTS` command.
 
 ```json
+[
   {
-    "Type": "C",
-    "User": "kldfwokoekrokerkreo",
-    "Database": "prod_read1_web",
-    "State": "active",
-    "Addr": "10.0.129.60",
-    "Port": 50962,
-    "LocalAddr": "10.0.78.178",
-    "LocalPort": 6543,
-    "ConnectTime": "2018-11-05 08:18:34",
-    "RequestTime": "2018-11-05 10:51:22",
-    "Ptr": "0x55fb15292a18",
-    "Link": "",
-    "RemotePid": 0,
-    "TLS": ""
-  },
-  {
-    "Type": "C",
-    "User": "kldfwokoekrokerkreo",
-    "Database": "prod_read1_web",
-    "State": "active",
-    "Addr": "10.0.69.98",
-    "Port": 39750,
-    "LocalAddr": "10.0.78.178",
-    "LocalPort": 6543,
-    "ConnectTime": "2018-11-05 08:53:58",
-    "RequestTime": "2018-11-05 10:18:28",
-    "Ptr": "0x7f7159b2a420",
-    "Link": "",
-    "RemotePid": 0,
-    "TLS": ""
+    "type": "C",
+    "user": "dd-agent",
+    "database": "pgbouncer",
+    "replication": "none",
+    "state": "idle",
+    "addr": "127.0.0.1",
+    "port": 58578,
+    "local_addr": "127.0.0.1",
+    "local_port": 6543,
+    "connect_time": "2026-10-30 15:39:01 UTC",
+    "request_time": "2026-10-30 15:39:04 UTC",
+    "wait": 2,
+    "wait_us": 39073,
+    "close_needed": 0,
+    "ptr": "0xffffbd460400",
+    "link": "",
+    "remote_pid": 0,
+    "tls": "",
+    "application_name": "",
+    "prepared_statements": 0,
+    "id": 1
   }
 ]
 ```
 
 ### /status/servers
 
-Returns the results of PGBouncer's `SHOW SERVERS` command formatted as JSON.
+Returns the results of PGBouncer's `SHOW SERVERS` command, with the same fields
+as `/status/clients` (`type` is `"S"` for server connections).
 
-Example:
+### /status/memory
 
-```json
-[
-  {
-    "Type": "S",
-    "User": "kldfwokoekrokerkreo",
-    "Database": "prod_read1_web",
-    "State": "idle",
-    "Addr": "34.254.85.1",
-    "Port": 31872,
-    "LocalAddr": "10.0.78.178",
-    "LocalPort": 45492,
-    "ConnectTime": "2018-11-05 12:03:12",
-    "RequestTime": "2018-11-05 12:10:12",
-    "Ptr": "0x55fb15589028",
-    "Link": "",
-    "RemotePid": 64451,
-    "TLS": "TLSv1.2/ECDHE-RSA-AES256-GCM-SHA384/ECDH=prime256v1"
-  },
-  {
-    "Type": "S",
-    "User": "kldfwokoekrokerkreo",
-    "Database": "prod_read1_web",
-    "State": "idle",
-    "Addr": "34.254.85.1",
-    "Port": 31872,
-    "LocalAddr": "10.0.78.178",
-    "LocalPort": 44966,
-    "ConnectTime": "2018-11-05 11:43:18",
-    "RequestTime": "2018-11-05 12:10:12",
-    "Ptr": "0x55fb159663e0",
-    "Link": "",
-    "RemotePid": 57603,
-    "TLS": "TLSv1.2/ECDHE-RSA-AES256-GCM-SHA384/ECDH=prime256v1"
-  }
-]
-```
-
-### /status/mems
-
-Returns the results of PGBouncer's `SHOW MEM` command formatted as JSON.
-
-Example:
+Returns the results of PGBouncer's `SHOW MEM` command.
 
 ```json
 [
   {
-    "Name": "user_cache",
-    "Size": 200,
-    "Used": 5,
-    "Free": 76,
-    "MemTotal": 16200
-  },
-  {
-    "Name": "db_cache",
-    "Size": 208,
-    "Used": 21,
-    "Free": 57,
-    "MemTotal": 16224
-  },
-  {
-    "Name": "pool_cache",
-    "Size": 408,
-    "Used": 11,
-    "Free": 39,
-    "MemTotal": 20400
-  },
-  {
-    "Name": "server_cache",
-    "Size": 392,
-    "Used": 78,
-    "Free": 322,
-    "MemTotal": 156800
-  },
-  {
-    "Name": "client_cache",
-    "Size": 392,
-    "Used": 2708,
-    "Free": 10092,
-    "MemTotal": 5017600
-  },
-  {
-    "Name": "iobuf_cache",
-    "Size": 4112,
-    "Used": 3,
-    "Free": 797,
-    "MemTotal": 3289600
+    "name": "user_cache",
+    "size": 2432,
+    "used": 2,
+    "free": 48,
+    "memtotal": 121600
   }
 ]
 ```
 
 ### /status/stats
 
-Returns the results of PGBouncer's `SHOW STATS` command formatted as JSON.
-
-Example:
+Returns the results of PGBouncer's `SHOW STATS` command.
 
 ```json
 [
   {
-    "Database": "pgbouncer",
-    "TotalRequests": 16,
-    "TotalReceived": 0,
-    "TotalSent": 0,
-    "TotalQueryTime": 0,
-    "AvgReq": 0,
-    "AvgRecv": 0,
-    "AvgSent": 0,
-    "AvgQuery": 0
+    "database": "pgbouncer",
+    "total_server_assignment_count": 0,
+    "total_xact_count": 1,
+    "total_query_count": 1,
+    "total_received": 0,
+    "total_sent": 0,
+    "total_xact_time": 0,
+    "total_query_time": 0,
+    "total_wait_time": 0,
+    "total_client_parse_count": 0,
+    "total_server_parse_count": 0,
+    "total_bind_count": 0,
+    "avg_server_assignment_count": 0,
+    "avg_xact_count": 0,
+    "avg_query_count": 0,
+    "avg_recv": 0,
+    "avg_sent": 0,
+    "avg_xact_time": 0,
+    "avg_query_time": 0,
+    "avg_wait_time": 0,
+    "avg_client_parse_count": 0,
+    "avg_server_parse_count": 0,
+    "avg_bind_count": 0
   }
 ]
-
 ```
 
 ## Server Debug Endpoints
 
 These were added to help debug unreachable servers. You need to start the binary with
 `ENABLE_DEBUG_ENDPOINTS=1` to make the available.
-                 
+
 ### /debug/dmesg
 
 Returns the raw output of `dmesg`
@@ -386,3 +313,25 @@ Returns the contents of `/proc/meminfo`.
 
 Returns the output of `journalctl --reverse -b --no-pager -n 50`
 
+## Upgrading from 2.x
+
+3.0 is a breaking release for consumers of the `/status/*` JSON:
+
+1. **All keys are now snake_case PGBouncer column names** instead of Go field
+   names (`"PoolMode"` → `"pool_mode"`, `"ClActive"` → `"cl_active"`, …).
+   A few don't follow the mechanical rename: `ReservePool` → `reserve_pool_size`,
+   `MaxWait` → `maxwait`, `MemTotal` → `memtotal`, `TLS` → `tls`.
+2. **Empty results are `[]`**, not `null`.
+3. **`/status/databases` `port` is a number**, not a string.
+4. **`/status/stats` no longer has `TotalRequests`, `AvgReq` or `AvgQuery`**
+   (PGBouncer removed them in 1.8). Use `total_query_count` /
+   `total_xact_count`, `avg_query_count` and `avg_query_time`.
+5. **`/status/pools` `pool_mode` may be `null`.**
+6. Many new fields are included; see the examples above.
+
+The full old → new field mapping is in the [CHANGELOG](CHANGELOG.md).
+
+Nothing changes for `/health`, `/`, `/ami-version` or `/debug/*`, or for
+configuration environment variables. The binary is published to S3 under the
+new version (`pgbouncer-healthcheck-3.0`); existing consumers of
+`pgbouncer-healthcheck-2.0` are unaffected until they switch.

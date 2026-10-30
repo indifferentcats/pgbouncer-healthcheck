@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
-	"github.com/pkg/errors"
 )
 
 func addStatusHandlers(router *httprouter.Router) {
@@ -25,7 +26,7 @@ func handleUsers(ctx context.Context, w http.ResponseWriter, _ httprouter.Params
 	}
 	users, err := getUsers(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching users from PGBouncer")
+		return fmt.Errorf("Error fetching users from PGBouncer: %w", err)
 	}
 	return returnJSON(w, users)
 }
@@ -36,7 +37,7 @@ func handleConfigs(ctx context.Context, w http.ResponseWriter, _ httprouter.Para
 	}
 	configs, err := getConfigs(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching configs from PGBouncer")
+		return fmt.Errorf("Error fetching configs from PGBouncer: %w", err)
 	}
 	return returnJSON(w, configs)
 }
@@ -47,7 +48,7 @@ func handleDatabases(ctx context.Context, w http.ResponseWriter, _ httprouter.Pa
 	}
 	databases, err := getDatabases(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching databases from PGBouncer")
+		return fmt.Errorf("Error fetching databases from PGBouncer: %w", err)
 	}
 	return returnJSON(w, databases)
 }
@@ -58,7 +59,7 @@ func handlePools(ctx context.Context, w http.ResponseWriter, _ httprouter.Params
 	}
 	pools, err := getPools(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching pools from PGBouncer")
+		return fmt.Errorf("Error fetching pools from PGBouncer: %w", err)
 	}
 	return returnJSON(w, pools)
 }
@@ -69,7 +70,7 @@ func handleClients(ctx context.Context, w http.ResponseWriter, _ httprouter.Para
 	}
 	clients, err := getClients(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching clients from PGBouncer")
+		return fmt.Errorf("Error fetching clients from PGBouncer: %w", err)
 	}
 	return returnJSON(w, clients)
 }
@@ -80,7 +81,7 @@ func handleServers(ctx context.Context, w http.ResponseWriter, _ httprouter.Para
 	}
 	servers, err := getServers(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching servers from PGBouncer")
+		return fmt.Errorf("Error fetching servers from PGBouncer: %w", err)
 	}
 	return returnJSON(w, servers)
 }
@@ -91,7 +92,7 @@ func handleMems(ctx context.Context, w http.ResponseWriter, _ httprouter.Params)
 	}
 	mems, err := getMems(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching mems from PGBouncer")
+		return fmt.Errorf("Error fetching mems from PGBouncer: %w", err)
 	}
 	return returnJSON(w, mems)
 }
@@ -102,7 +103,7 @@ func handleStats(ctx context.Context, w http.ResponseWriter, _ httprouter.Params
 	}
 	stats, err := getStats(ctx, db)
 	if err != nil {
-		return errors.Wrap(err, "Error fetching stats from PGBouncer")
+		return fmt.Errorf("Error fetching stats from PGBouncer: %w", err)
 	}
 	return returnJSON(w, stats)
 }

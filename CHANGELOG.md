@@ -1,0 +1,82 @@
+# Changelog
+
+All notable changes to this project are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/).
+
+## [3.0] - Unreleased
+
+### ⚠️ Breaking changes
+
+The JSON returned by every `/status/*` endpoint has changed. Previously,
+`SHOW …` results were scanned by column position into fixed structs, which
+broke on any PGBouncer newer than ~1.8 (enhanced health checks and most
+`/status/*` endpoints returned 500). Columns are now matched by name, and the
+JSON keys are the PGBouncer column names.
+
+- All keys are snake_case PGBouncer column names instead of Go field names.
+- Empty results serialise as `[]` instead of `null`.
+- New fields are exposed for columns added in newer PGBouncer versions.
+
+Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
+
+| Endpoint | 2.x | 3.0 |
+|---|---|---|
+| `/status/users` | `Name`, `PoolMode` | `name`, `pool_mode` |
+| | — | Added: `pool_size`, `reserve_pool_size` (number or `null`), `max_user_connections`, `current_connections`, `max_user_client_connections`, `current_client_connections` |
+| `/status/configs` | `Key`, `Value`, `Changeable` | `key`, `value`, `changeable` (still a boolean) |
+| | — | Added: `default` |
+| `/status/databases` | `Name`, `Host`, `Database`, `ForceUser`, `PoolSize`, `PoolMode`, `MaxConnections`, `CurrentConnections` | `name`, `host`, `database`, `force_user`, `pool_size`, `pool_mode`, `max_connections`, `current_connections` |
+| | `Port` (string) | `port` (**number**) |
+| | `ReservePool` | `reserve_pool_size` |
+| | — | Added: `min_pool_size`, `server_lifetime`, `load_balance_hosts`, `max_client_connections`, `current_client_connections`, `paused`, `disabled` (0/1) |
+| `/status/pools` | `Database`, `User`, `ClActive`, `ClWaiting`, `SvActive`, `SvIdle`, `SvUsed`, `SvTested`, `SvLogin` | `database`, `user`, `cl_active`, `cl_waiting`, `sv_active`, `sv_idle`, `sv_used`, `sv_tested`, `sv_login` |
+| | `MaxWait` | `maxwait` |
+| | `PoolMode` (string) | `pool_mode` (string or **`null`**) |
+| | — | Added: `cl_active_cancel_req`, `cl_waiting_cancel_req`, `sv_active_cancel`, `sv_being_canceled`, `maxwait_us`, `load_balance_hosts` |
+| `/status/clients`, `/status/servers` | `Type`, `User`, `Database`, `State`, `Addr`, `Port`, `LocalAddr`, `LocalPort`, `ConnectTime`, `RequestTime`, `Ptr`, `Link`, `RemotePid` | `type`, `user`, `database`, `state`, `addr`, `port`, `local_addr`, `local_port`, `connect_time`, `request_time`, `ptr`, `link`, `remote_pid` |
+| | `TLS` | `tls` |
+| | — | Added: `replication`, `wait`, `wait_us`, `close_needed`, `application_name`, `prepared_statements`, `id` |
+| `/status/memory` | `Name`, `Size`, `Used`, `Free` | `name`, `size`, `used`, `free` |
+| | `MemTotal` | `memtotal` |
+| `/status/stats` | `Database`, `TotalReceived`, `TotalSent`, `TotalQueryTime`, `AvgRecv`, `AvgSent` | `database`, `total_received`, `total_sent`, `total_query_time`, `avg_recv`, `avg_sent` |
+| | **Removed:** `TotalRequests`, `AvgReq`, `AvgQuery` (dropped by PGBouncer 1.8) | Use `total_query_count` / `total_xact_count`, `avg_query_count`, `avg_query_time` |
+| | — | Added: `total_server_assignment_count`, `total_xact_count`, `total_query_count`, `total_xact_time`, `total_wait_time`, `total_client_parse_count`, `total_server_parse_count`, `total_bind_count`, and the matching `avg_*` fields |
+
+### Changed
+
+- Build system: `dep` + `vendor/` replaced by Go modules; `Makefile` replaced
+  by `Taskfile.yml`; builds and tests run under Podman (default) or Docker.
+- The binary is fully static (`CGO_ENABLED=0`) and a `FROM scratch` runtime
+  image target is provided (`task image`).
+- Version and build date are set at link time (`-ldflags -X`) instead of
+  rewriting `version.go`.
+- Built with Go 1.27; test image uses Alpine 3.24 / PGBouncer 1.25.
+- Dependencies updated: `lib/pq` 1.0.0 → 1.12.3, `httprouter` 1.2.0 → 1.3.0,
+  `envconfig` 1.3.0 → 1.4.0. `github.com/pkg/errors` removed in favour of the
+  standard library.
+- Error responses: "occured" typo fixed to "occurred". `lib/pq` errors now
+  include the SQLSTATE code.
+- HTTP server now has read/write/idle timeouts.
+- The "Connected to PGBouncer database" log line is only printed after a
+  successful query.
+- CI: CircleCI uses Task and a current remote Docker; CodeQL actions updated.
+  All GitHub Actions are pinned by commit SHA, base images by digest, and the
+  CI go-task download by SHA-256.
+
+### Fixed
+
+- Enhanced health check and `/status/*` endpoints failing on PGBouncer > 1.8
+  (see Breaking changes).
+- Port probe ignored its `port` argument.
+- Enhanced health check panicked if the database handle could not be created.
+- Port probe now honours the request timeout.
+- Test stub for a hanging Datadog agent overwrote its own shebang.
+
+### Added
+
+- Integration tests covering the JSON shape of every `/status/*` endpoint.
+
+## [2.0]
+
+Last release built with `dep` and Go 1.10.

@@ -17,6 +17,8 @@ desc "Debug endpoints disabled by default, should return Error"
 test_notok_debug
 desc "Status endpoints should return OK"
 test_ok_status
+desc "All status endpoints should return JSON arrays with PGBouncer data"
+test_all_status_json
 
 stop_pgbouncer
 desc "PGBouncer is stopped, healthcheck should return Error"

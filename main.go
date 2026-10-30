@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/kelseyhightower/envconfig"
@@ -33,21 +35,39 @@ func initServer() *http.Server {
 		log.Print("Enabling Debug Endpoints")
 		addDebugHandlers(router)
 	}
+	// Handlers time out after 10s (see makeRequestHandlerWithContext), so
+	// WriteTimeout must be longer than that.
 	return &http.Server{
-		Handler: router,
-		Addr:    fmt.Sprintf(":%d", config.Port),
+		Handler:           router,
+		Addr:              fmt.Sprintf(":%d", config.Port),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 }
 
 func initDB() {
 	var err error
 	db, err = sql.Open("postgres", config.Connstr)
-	if err == nil {
-		log.Printf("Connected to PGBouncer database")
-	} else {
+	if err != nil {
 		db = nil
 		log.Printf("Could not open database: %s", err)
+		return
 	}
+	// sql.Open does not connect; run a query so the log reflects reality.
+	// db.Ping sends ";", which the PGBouncer admin console may not accept.
+	// A failure here is not fatal: PGBouncer may not be up yet, and the pool
+	// reconnects on demand.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, "SHOW VERSION")
+	if err != nil {
+		log.Printf("Could not connect to PGBouncer database (will retry on request): %s", err)
+		return
+	}
+	rows.Close()
+	log.Printf("Connected to PGBouncer database")
 }
 
 func version() {
@@ -72,6 +92,6 @@ func main() {
 	webserver := initServer()
 	log.Printf("Listening on port %d", config.Port)
 	if err := webserver.ListenAndServe(); err != nil {
-		log.Fatalf("Error occured while listening for connections: %s", err)
+		log.Fatalf("Error occurred while listening for connections: %s", err)
 	}
 }

@@ -10,20 +10,31 @@ run_test() {
     echo "Running test: $1"
     echo "==================================="
     echo ""
-    if docker run -it --rm -e VERBOSE -w="/tests" "$APPNAME" "/tests/$1"; then
+    if "$CONTAINER_TOOL" run "${tty_opts[@]}" --rm -e VERBOSE -w="/tests" "$IMAGE" "/tests/$1"; then
         pass "-* $1 script passed *-"
     else
         fail "-* $1 script failed *-"
     fi
 }
 
-APPNAME=${1:-pgbouncer-healthcheck}
+IMAGE=${1:-pgbouncer-healthcheck:test}
 shift
 
+CONTAINER_TOOL=${CONTAINER_TOOL:-podman}
 export VERBOSE=${VERBOSE:-0}
 
+# Only allocate a TTY when we have one (e.g. not in CI)
+tty_opts=()
+if [[ -t 1 ]]; then
+    tty_opts=("-t")
+fi
+
 if [[ $# -eq 0 ]]; then
-    mapfile -t tests < <(find scripts -name '*.sh' ! -name 'common.sh' -printf '%f\n')
+    tests=()
+    for script in scripts/*.sh; do
+        name=$(basename "$script")
+        [[ $name == common.sh ]] || tests+=("$name")
+    done
 else
     tests=("$@")
 fi
