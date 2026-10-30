@@ -101,8 +101,11 @@ Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
 - The "Connected to PGBouncer database" log line is only printed after a
   successful query.
 - CI: CircleCI uses Task and a current remote Docker; CodeQL actions updated.
-  All GitHub Actions are pinned by commit SHA, base images by digest, and the
-  CI go-task download by SHA-256.
+  All GitHub Actions are pinned by commit SHA, base images by digest, and
+  downloaded tools by SHA-256.
+- The Go toolchain is pinned exactly (`toolchain go1.27.3` in `go.mod`). CI
+  builds Go code in a digest-pinned Go image with `GOTOOLCHAIN=local` instead
+  of using `actions/setup-go`, which doesn't verify the Go downloads.
 
 ### Fixed
 
@@ -123,6 +126,10 @@ Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
   arm64 runners, and unit tests with coverage. README badges show build, unit
   test, coverage and CodeQL status.
 - `task release` to tag and publish a GitHub release with binaries.
+- Security workflow: on every change and daily, `govulncheck` and
+  `osv-scanner` (which includes OpenSSF malicious-package reports) scan the
+  dependencies. On PRs, `dependency-review` blocks newly added dependencies and
+  GitHub Actions with known advisories. Run locally with `task vuln`.
 
 ## [2.0]
 

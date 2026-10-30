@@ -30,6 +30,12 @@ jobs:
     name: Analyze
     # Pinned rather than ubuntu-latest, which moves between Ubuntu releases
     runs-on: ubuntu-24.04
+    # Build with the Go image pinned by digest (same Go release as the
+    # Dockerfile) instead of setup-go, whose downloads aren't hash-verified
+    container:
+      image: golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385
+    env:
+      GOTOOLCHAIN: local
     permissions:
       contents: read
       security-events: write
@@ -46,13 +52,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # Install the Go toolchain declared in go.mod so autobuild uses it
-      # rather than the runner's preinstalled Go.
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL

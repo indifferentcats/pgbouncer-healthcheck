@@ -91,6 +91,18 @@ tasks:
       - go tool cover -html={{.DIST}}/coverage.out -o {{.DIST}}/coverage.html
       - echo "Wrote {{.DIST}}/coverage.html"
 
+  vuln:
+    desc: Scan dependencies for vulnerabilities (govulncheck; plus osv-scanner if installed)
+    cmds:
+      - go tool -modfile=tools/go.mod govulncheck ./...
+      - cd tools && go tool govulncheck ./...
+      - |
+        if command -v osv-scanner >/dev/null 2>&1; then
+          osv-scanner scan source -r .
+        else
+          echo "osv-scanner not installed (brew install osv-scanner); skipping"
+        fi
+
   vet:
     desc: Run go vet and check formatting locally
     cmds:

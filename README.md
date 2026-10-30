@@ -4,6 +4,7 @@
 [![Unit tests](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/unit-tests.yml/badge.svg?branch=master)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/unit-tests.yml)
 [![Coverage](https://raw.githubusercontent.com/indifferentcats/pgbouncer-healthcheck/badges/coverage.svg)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/unit-tests.yml)
 [![CodeQL](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/codeql-analysis.yml/badge.svg?branch=master)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/codeql-analysis.yml)
+[![Security](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/security.yml/badge.svg?branch=master)](https://github.com/indifferentcats/pgbouncer-healthcheck/actions/workflows/security.yml)
 
 ## Introduction
 
@@ -30,6 +31,7 @@ only needed for `task vet` / `task tidy`.
     $ task test -- enhanced.sh    # run a subset of test scripts
     $ task test:unit              # Go unit tests (needs local Go), with coverage
     $ task coverage               # HTML coverage report in dist/coverage.html
+    $ task vuln                   # dependency vulnerability scan
     $ task image                  # minimal FROM-scratch runtime image
     $ task --list                 # everything else
 
@@ -67,12 +69,31 @@ GitHub Actions run on every push to `master` and every PR:
   uploaded as an artifact. On `master`, the coverage badge is regenerated and
   pushed to the `badges` branch; no third-party coverage service is used.
 - **CodeQL** (`codeql-analysis.yml`): static analysis.
+- **Security** (`security.yml`), on every change and daily:
+  - `govulncheck` checks the Go vulnerability database against dependencies
+    and the Go standard library, and fails on vulnerabilities in code that is
+    actually reachable.
+  - `osv-scanner` checks OSV, which aggregates the Go database, GitHub
+    advisories and OpenSSF malicious-package reports, so it also catches
+    dependencies announced as compromised. Results go to the Security tab.
+  - On PRs, `dependency-review` blocks newly added or updated dependencies,
+    including GitHub Actions, that have known advisories.
+
+The unit-test, CodeQL and govulncheck jobs run inside the digest-pinned
+`golang:<version>-trixie` image with `GOTOOLCHAIN=local`, so CI never downloads
+an unverified Go toolchain.
 
 ### Supply-chain pinning
 
-Build inputs are pinned: Go modules via `go.sum`, base images in the
-`Dockerfile` by digest, GitHub Actions by commit SHA, runners to a specific
-Ubuntu release, and CI's go-task downloads by SHA-256. When bumping any of them, update the version and the
+Build inputs are pinned:
+- Go modules: by SHA-256 in `go.sum`, checked against the public Go checksum
+  database. CI tools such as govulncheck are pinned in `tools/go.mod`.
+- The Go toolchain: the `toolchain` line in `go.mod`, plus digest-pinned Go
+  images in the `Dockerfile` and CI.
+- Base images: by digest.
+- GitHub Actions: by commit SHA, with runners pinned to a specific Ubuntu
+  release.
+- Downloaded tools (go-task, osv-scanner): by SHA-256. When bumping any of them, update the version and the
 hash together.
 
 ## Configuration

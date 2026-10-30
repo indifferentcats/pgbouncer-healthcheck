@@ -1,6 +1,9 @@
 # Base images are pinned by multi-arch index digest to guard against tag
 # tampering. The tag is informational; update tag and digest together.
-ARG GO_IMAGE=golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb
+# Keep the Go release in sync with `toolchain` in go.mod and the
+# golang:<version>-trixie image used by the GitHub Actions unit-test, CodeQL
+# and security jobs.
+ARG GO_IMAGE=golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb
 ARG ALPINE_IMAGE=alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 # Build a fully static binary. The build stage runs on the native platform

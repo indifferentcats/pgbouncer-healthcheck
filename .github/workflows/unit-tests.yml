@@ -18,6 +18,17 @@ jobs:
   unit:
     name: Go unit tests
     runs-on: ubuntu-24.04
+    # Run in the Go image pinned by digest (same Go release as the Dockerfile
+    # build stage) rather than setup-go, whose downloads aren't hash-verified.
+    # Debian, not Alpine: the race detector needs cgo/gcc.
+    container:
+      image: golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Never let go download a different toolchain than the pinned image's
+      GOTOOLCHAIN: local
     outputs:
       coverage: ${{ steps.coverage.outputs.percent }}
     steps:
@@ -26,40 +37,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
       - name: Run unit tests
         run: |
           set -o pipefail
           mkdir -p dist
           go test -race -count=1 -covermode=atomic -coverprofile=dist/coverage.out -json ./... \
             | tee dist/test-results.json \
-            | jq -rj 'select(.Action == "output" or .Action == "build-output") | .Output'
+            | go -C tools run ./testreport -stream
 
       - name: Test report
         if: always()
         run: |
           [ -s dist/test-results.json ] || exit 0
-          results=dist/test-results.json
-          count() { jq -s --arg a "$1" '[.[] | select(.Test != null and .Action == $a)] | length' "$results"; }
-          passed=$(count pass); failed=$(count fail); skipped=$(count skip)
-          # Package-level failures (build errors, panics, timeouts) have no Test
-          pkg_failed=$(jq -s '[.[] | select(.Test == null and .Action == "fail")] | length' "$results")
-          {
-            echo "## Unit tests"
-            echo
-            echo "| ✅ Passed | ❌ Failed | ⏭️ Skipped | 📦 Packages failed |"
-            echo "|---|---|---|---|"
-            echo "| $passed | $failed | $skipped | $pkg_failed |"
-            if [ "$failed" -gt 0 ] || [ "$pkg_failed" -gt 0 ]; then
-              echo
-              echo "### Failures"
-              jq -rs '.[] | select(.Action == "fail") | "- `\(.Package)\(if .Test then " " + .Test else " (package)" end)`"' "$results"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          go -C tools run ./testreport -summary "$PWD/dist/test-results.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Coverage report
         id: coverage
