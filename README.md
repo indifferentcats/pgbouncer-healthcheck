@@ -88,6 +88,10 @@ be fine for most use cases.
 The intention is that the username and password will be supplied by setting the
 `PGUSER` and `PGPASSWORD` standard variables.
 
+The driver supports SCRAM-SHA-256, so configure PGBouncer with
+`auth_type = scram-sha-256` rather than `md5`. `tests/scram-secret.py PASSWORD`
+prints a SCRAM secret for PGBouncer's `auth_file`.
+
 ### Other parameters
 
 - `PORT`: The TCP port the daemon should use to listen for HTTP connections (default: 8000)

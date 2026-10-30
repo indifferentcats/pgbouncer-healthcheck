@@ -93,6 +93,11 @@ Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
 - HTTP server now has read/write/idle timeouts.
 - `sudo` is no longer used, and has been removed from the test image. The
   integration test PGBouncer stats user is renamed from `dd-agent` to `stats`.
+- The integration test PGBouncer uses `auth_type = scram-sha-256` instead of
+  `md5`, with a SCRAM secret in `tests/userlist.txt`
+  (regenerate with `tests/scram-secret.py PASSWORD`). The healthcheck's
+  `lib/pq` driver authenticates with SCRAM-SHA-256, so production PGBouncer
+  configs can drop `md5` too.
 - The "Connected to PGBouncer database" log line is only printed after a
   successful query.
 - CI: CircleCI uses Task and a current remote Docker; CodeQL actions updated.

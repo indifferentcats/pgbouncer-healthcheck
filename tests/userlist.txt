@@ -1,1 +1,1 @@
-"stats" "md5ebd881f916a85a8355f768f940fe9421"
+"stats" "SCRAM-SHA-256$4096:41Zll/aLCveb6dJLnQrmbQ==$BxwpkTxOG/Yvf1orxx9fKWAwfjcp2rbIxNGreuxrS7Q=:Av6ZKcpH8b0oLE+IHgl2KU6iJ+Y544BZLSi4LtmuQLc="
