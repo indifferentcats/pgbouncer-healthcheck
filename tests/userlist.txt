@@ -1,2 +1,1 @@
-"dd-agent" "md5a5c4e3204156a17079057d82bcd0885a"
-
+"stats" "SCRAM-SHA-256$4096:41Zll/aLCveb6dJLnQrmbQ==$BxwpkTxOG/Yvf1orxx9fKWAwfjcp2rbIxNGreuxrS7Q=:Av6ZKcpH8b0oLE+IHgl2KU6iJ+Y544BZLSi4LtmuQLc="

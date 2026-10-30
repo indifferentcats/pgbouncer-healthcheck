@@ -48,36 +48,50 @@ else
    curl_opts=("--silent" "--output" "/dev/null" "--write-out" "%{http_code}")
 fi
 
-# Location to put fake datadog-agent binary
-DDAGENT_FAKE=/usr/bin/datadog-agent
-
+# Succeeds only if the request completed with a non-error HTTP status. A
+# connection failure (curl exits non-zero) counts as an error.
 _curl() {
     url=$1
-    if STATUSCODE=$(curl "${curl_opts[@]}" "$url"); then
-        if [[ $STATUSCODE -gt 400 ]]; then
-            info "Request returned $STATUSCODE"
-            return 1
-        fi
+    if ! STATUSCODE=$(curl "${curl_opts[@]}" "$url"); then
+        info "Request to $url failed (no HTTP response)"
+        return 1
+    fi
+    if [[ $STATUSCODE -ge 400 ]]; then
+        info "Request returned $STATUSCODE"
+        return 1
     fi
 }
 
+# wait_for_port PORT NAME: wait up to 10s for something to accept connections
+wait_for_port() {
+    port=$1
+    name=$2
+    for _ in $(seq 50); do
+        if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    fatal "$name did not start listening on port $port"
+}
+
 init_creds() {
-    export PGUSER="dd-agent"
+    export PGUSER="stats"
     export PGPASSWORD="3c5c04a7-c21a-480f-bc42-30a1e0550fbc"
 }
 
 start_healthcheck() {
     info "Starting Healthcheck process"
-    "${GOPATH}/src/github.com/deliveroo/pgbouncer-healthcheck/pgbouncer-healthcheck" &
+    /usr/local/bin/pgbouncer-healthcheck &
     health_pid=$!
+    wait_for_port 8000 "Healthcheck"
 }
 
 start_pgbouncer() {
     info "Starting PGBouncer"
     pgbouncer -u pgbouncer /etc/pgbouncer/pgbouncer.ini >&/dev/null &
     pgbouncer_pid=$!
-    # Needs some time become ready
-    sleep 1
+    wait_for_port 6543 "PGBouncer"
 }
 
 stop_pgbouncer() {
@@ -171,20 +185,51 @@ test_notok_status() {
     test_notok_endpoint "/status/users" "Status Endpoint"
 }
 
-make_dd_stub_hang() {
-    printf '#!/bin/sh\n' >"$DDAGENT_FAKE"
-    printf 'sleep 1000000\n' >"$DDAGENT_FAKE"
-    chmod 755 "$DDAGENT_FAKE"
+# test_json_endpoint PATH NAME JQ_FILTER
+# Passes if PATH returns HTTP 200 with a JSON body for which JQ_FILTER
+# evaluates to true (jq -e).
+test_json_endpoint() {
+    path=$1
+    name=$2
+    filter=$3
+    info "Testing JSON from $name ($path)"
+    body=$(curl --silent --write-out '\n%{http_code}' "localhost:8000$path")
+    code=${body##*$'\n'}
+    body=${body%$'\n'*}
+    if [[ $VERBOSE -gt 0 ]]; then
+        echo "$body" >&2
+    fi
+    if [[ $code != 200 ]]; then
+        fail "$name returned HTTP $code: ${body:0:300}"
+    elif ! jq -e "$filter" >/dev/null 2>&1 <<<"$body"; then
+        fail "$name JSON did not match '$filter': ${body:0:300}"
+    else
+        pass "$name returned expected JSON"
+    fi
 }
 
-make_dd_stub_pass() {
-    printf '#!/bin/true\n' >"$DDAGENT_FAKE"
-    chmod 755 "$DDAGENT_FAKE"
-}
-
-make_dd_stub_fail() {
-    printf '#!/bin/false\n' >"$DDAGENT_FAKE"
-    chmod 755 "$DDAGENT_FAKE"
+# Check every /status endpoint returns a JSON array with the expected shape.
+# Requires PGBouncer running and stats-user credentials (init_creds).
+test_all_status_json() {
+    test_json_endpoint /status/users "Status users" \
+        'type == "array" and any(.[]; .name == "stats" and (.max_user_connections | type) == "number")'
+    test_json_endpoint /status/configs "Status configs" \
+        'type == "array" and any(.[]; .key == "listen_port" and .value == "6543")
+         and all(.[]; (.changeable | type) == "boolean")'
+    test_json_endpoint /status/databases "Status databases" \
+        'type == "array" and any(.[]; .name == "dummy" and .host == "10.0.0.1" and .port == 5432 and .pool_size == 100)
+         and any(.[]; .name == "pgbouncer" and .host == null)'
+    test_json_endpoint /status/pools "Status pools" \
+        'type == "array" and any(.[]; .database == "pgbouncer" and (.cl_active | type) == "number")'
+    test_json_endpoint /status/clients "Status clients" \
+        'type == "array" and any(.[]; .user == "stats" and .database == "pgbouncer" and (.port | type) == "number")'
+    # No backend Postgres in the test environment, so there are no servers
+    test_json_endpoint /status/servers "Status servers" \
+        '. == []'
+    test_json_endpoint /status/memory "Status memory" \
+        'type == "array" and length > 0 and all(.[]; (.name | type) == "string" and (.memtotal | type) == "number")'
+    test_json_endpoint /status/stats "Status stats" \
+        'type == "array" and any(.[]; .database == "pgbouncer" and (.total_query_count | type) == "number")'
 }
 
 summary() {

@@ -1,0 +1,129 @@
+name: Unit tests
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel superseded runs for the same branch/PR
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  unit:
+    name: Go unit tests
+    runs-on: ubuntu-24.04
+    # Run in the Go image pinned by digest (same Go release as the Dockerfile
+    # build stage) rather than setup-go, whose downloads aren't hash-verified.
+    # Debian, not Alpine: the race detector needs cgo/gcc.
+    container:
+      image: golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Never let go download a different toolchain than the pinned image's
+      GOTOOLCHAIN: local
+    outputs:
+      coverage: ${{ steps.coverage.outputs.percent }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          mkdir -p dist
+          go test -race -count=1 -covermode=atomic -coverprofile=dist/coverage.out -json ./... \
+            | tee dist/test-results.json \
+            | go -C tools run ./testreport -stream
+
+      - name: Test report
+        if: always()
+        run: |
+          [ -s dist/test-results.json ] || exit 0
+          go -C tools run ./testreport -summary "$PWD/dist/test-results.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage report
+        id: coverage
+        run: |
+          pct=$(go tool cover -func=dist/coverage.out | awk '/^total:/ { sub("%", "", $3); print $3 }')
+          echo "percent=$pct" >> "$GITHUB_OUTPUT"
+          go tool cover -html=dist/coverage.out -o dist/coverage.html
+          {
+            echo "## Coverage: ${pct}%"
+            echo
+            echo '<details><summary>Per-function coverage</summary>'
+            echo
+            echo '```'
+            go tool cover -func=dist/coverage.out
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-test-results
+          path: |
+            dist/test-results.json
+            dist/coverage.out
+            dist/coverage.html
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Publish the coverage badge to the `badges` branch (master only). Generated
+  # locally so no third-party coverage service is involved.
+  coverage-badge:
+    name: Publish coverage badge
+    needs: unit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: coverage-badge
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Update badge
+        env:
+          PCT: ${{ needs.unit.outputs.coverage }}
+        run: |
+          case "$PCT" in
+            ''|*[!0-9.]*) echo "Invalid coverage value: '$PCT'" >&2; exit 1 ;;
+          esac
+          # Only publish for the current master head, so a slow or re-run older
+          # run can't overwrite the badge with stale coverage
+          head=$(git ls-remote origin refs/heads/master | cut -f1)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "master is now at ${head}; skipping badge for ${GITHUB_SHA}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin badges >/dev/null; then
+            git fetch --depth 1 origin badges:refs/remotes/origin/badges
+            git worktree add -B badges "$RUNNER_TEMP/badges" origin/badges
+          else
+            git worktree add --orphan -b badges "$RUNNER_TEMP/badges"
+          fi
+          sh .github/scripts/coverage-badge.sh "$PCT" "$RUNNER_TEMP/badges/coverage.svg"
+          cd "$RUNNER_TEMP/badges"
+          git add coverage.svg
+          if git diff --cached --quiet; then
+            echo "Coverage badge unchanged (${PCT}%)"
+          else
+            git commit -m "Update coverage badge to ${PCT}% (${GITHUB_SHA::7})"
+            git push origin badges
+          fi

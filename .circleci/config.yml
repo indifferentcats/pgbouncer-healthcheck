@@ -7,17 +7,40 @@ global_context: &global_context
   context:
     - org-global
 global_remote_docker: &global_remote_docker
-  version: 19.03.13
+  # `default` tracks CircleCI's current supported Docker release (BuildKit on by default).
+  version: default
 global_dockerhub_auth: &global_dockerhub_auth
   auth:
     username: $GLOBAL_DOCKERHUB_USERNAME
     password: $GLOBAL_DOCKERHUB_PASSWORD
 version: 2
 
+# go-task (https://taskfile.dev) replaces make. Pinned to a release tarball and
+# verified against its SHA-256 (from the release's task_checksums.txt) rather
+# than piping an install script into sh. Update both values together.
+install_task: &install_task
+  run:
+    name: Install go-task
+    command: |
+      TASK_VERSION=3.54.0
+      TASK_SHA256=680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb
+      mkdir -p "$HOME/bin"
+      curl --fail --silent --show-error --location -o /tmp/task.tar.gz \
+        "https://github.com/go-task/task/releases/download/v${TASK_VERSION}/task_linux_amd64.tar.gz"
+      echo "${TASK_SHA256}  /tmp/task.tar.gz" | sha256sum -c -
+      tar -xzf /tmp/task.tar.gz -C "$HOME/bin" task
+      rm /tmp/task.tar.gz
+      echo 'export PATH="$HOME/bin:$PATH"' >> "$BASH_ENV"
+      "$HOME/bin/task" --version
+
 defaults: &defaults
   docker:
   - image: deliveroo/circleci:0.4.2
     <<: *global_dockerhub_auth
+  environment:
+    # The Dockerfile needs BuildKit (FROM --platform, COPY --chmod). Force it on
+    # in case the image's Docker CLI predates BuildKit being the default.
+    DOCKER_BUILDKIT: "1"
 
 workflows:
   version: 2
@@ -41,21 +64,23 @@ jobs:
     steps:
     - setup_remote_docker:
         <<: *global_remote_docker
-        reusable: true
         docker_layer_caching: true
 
     - *global_dockerhub_login
     - checkout
+    - *install_task
 
-    - run: make clean
+    - run: task clean
 
-    - run: make build
+    # Taskfile defaults to podman and the host arch; release builds use docker
+    # and amd64, so the binary lands in dist/linux-amd64/pgbouncer-healthcheck.
+    - run: task build CONTAINER_TOOL=docker ARCH=amd64
 
-    - run: make test
+    - run: task test CONTAINER_TOOL=docker ARCH=amd64
 
     - run:
         name: Save zipped binary to the workspace
-        command: make stash
+        command: task stash CONTAINER_TOOL=docker ARCH=amd64
 
     - persist_to_workspace:
         root: workspace
@@ -66,11 +91,12 @@ jobs:
     <<: *defaults
 
     environment:
-    - TARGET: platform
+      TARGET: platform
 
     steps:
       - *global_dockerhub_login
       - checkout
+      - *install_task
 
       - attach_workspace:
           at: workspace
@@ -79,5 +105,5 @@ jobs:
           name: Push binary to S3
           command: |
             `print_env ${TARGET}`
-            make unstash
-            make upload
+            task unstash ARCH=amd64
+            task upload ARCH=amd64

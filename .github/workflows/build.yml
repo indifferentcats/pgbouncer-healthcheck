@@ -1,0 +1,75 @@
+name: Build
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel superseded runs for the same branch/PR
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and integration test (linux/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners for each arch, so the integration tests run the
+          # binary without emulation. task_sha256 is from go-task's
+          # task_checksums.txt for TASK_VERSION.
+          - arch: amd64
+            runner: ubuntu-24.04
+            task_asset: task_linux_amd64.tar.gz
+            task_sha256: 680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            task_asset: task_linux_arm64.tar.gz
+            task_sha256: d7189d439d4a6058e39e1b2acd7c8b27acd4856691b408f23b242e4294e1df5b
+    env:
+      TASK_VERSION: 3.54.0
+      CONTAINER_TOOL: docker
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install go-task
+        env:
+          TASK_ASSET: ${{ matrix.task_asset }}
+          TASK_SHA256: ${{ matrix.task_sha256 }}
+        run: |
+          curl --fail --silent --show-error --location -o "$RUNNER_TEMP/task.tar.gz" \
+            "https://github.com/go-task/task/releases/download/v${TASK_VERSION}/${TASK_ASSET}"
+          echo "${TASK_SHA256}  $RUNNER_TEMP/task.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$RUNNER_TEMP/task.tar.gz" -C "$HOME/.local/bin" task
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/task" --version
+
+      - name: Build static binary
+        run: task build ARCH="$ARCH" CONTAINER_TOOL="$CONTAINER_TOOL"
+
+      - name: Verify binary is static
+        run: |
+          file "dist/linux-$ARCH/pgbouncer-healthcheck" | tee /dev/stderr | grep -q 'statically linked'
+
+      - name: Integration tests
+        run: task test ARCH="$ARCH" CONTAINER_TOOL="$CONTAINER_TOOL"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pgbouncer-healthcheck-linux-${{ matrix.arch }}
+          path: dist/linux-${{ matrix.arch }}/pgbouncer-healthcheck
+          if-no-files-found: error
+          retention-days: 14

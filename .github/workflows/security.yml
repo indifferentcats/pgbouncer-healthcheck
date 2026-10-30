@@ -1,0 +1,113 @@
+name: Security
+
+# Dependency vulnerability and compromise checks. Runs daily as well as on
+# changes, so newly announced vulnerabilities or malicious-package advisories
+# are caught even when the code hasn't changed.
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Go's official vulnerability scanner (vuln.go.dev). Checks module
+  # dependencies and the Go standard library/toolchain, and only fails on
+  # vulnerabilities in code this project can actually reach.
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    container:
+      image: golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # govulncheck's version is pinned, with hashes, in tools/go.mod/go.sum
+      - name: Scan application
+        run: go tool -modfile=tools/go.mod govulncheck -show verbose ./...
+
+      - name: Scan CI tools module
+        working-directory: tools
+        run: go tool govulncheck ./...
+
+  # OSV (osv.dev) aggregates the Go vulnerability database, GitHub advisories
+  # and OpenSSF malicious-package reports (MAL-* records), so this also flags
+  # dependencies announced as compromised. Scans go.mod and tools/go.mod,
+  # including the Go standard library version.
+  osv-scanner:
+    name: OSV-Scanner
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      OSV_VERSION: 2.7.0
+      # From the release's osv-scanner_SHA256SUMS; update both together
+      OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install osv-scanner
+        run: |
+          curl --fail --silent --show-error --location -o "$RUNNER_TEMP/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          "$RUNNER_TEMP/osv-scanner" --version
+
+      - name: Scan dependencies
+        id: scan
+        run: |
+          set +e
+          "$RUNNER_TEMP/osv-scanner" scan source -r --format sarif --output-file osv.sarif .
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          "$RUNNER_TEMP/osv-scanner" scan source -r --format markdown . >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      # Findings appear in the repository's Security > Code scanning tab
+      - name: Upload results to code scanning
+        if: always() && hashFiles('osv.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+
+      - name: Fail on findings
+        env:
+          EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
+        run: |
+          # 0 = no issues; anything else is a finding or a scanner error
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "osv-scanner reported issues (exit $EXIT_CODE); see the job summary" >&2
+            exit 1
+          fi
+
+  # Blocks PRs that add or update a dependency with a known vulnerability,
+  # including GitHub Actions (e.g. a compromised action release), using the
+  # GitHub Advisory Database.
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low
