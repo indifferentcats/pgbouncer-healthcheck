@@ -16,7 +16,8 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
-// withGlobals sets the package-level config and db for one test.
+// withGlobals sets the package-level config and db for one test. Tests using
+// it must not call t.Parallel().
 func withGlobals(t *testing.T, cfg configuration, d *sql.DB) {
 	t.Helper()
 	oldCfg, oldDB := config, db
@@ -41,7 +42,8 @@ func statusFixtures() map[string]fakeResult {
 		"SHOW CLIENTS":   {columns: []string{"type", "user", "port"}, rows: [][]driver.Value{{"C", "dd-agent", int64(5000)}}},
 		"SHOW SERVERS":   {columns: []string{"type", "user", "port"}, rows: [][]driver.Value{{"S", "app", int64(5432)}}},
 		"SHOW MEM":       {columns: []string{"name", "size", "used", "free", "memtotal"}, rows: [][]driver.Value{{"user_cache", int64(1), int64(2), int64(3), int64(4)}}},
-		"SHOW STATS":     {columns: []string{"database", "total_query_count"}, rows: [][]driver.Value{{"pgbouncer", int64(9)}}},
+		// lib/pq returns []byte for numeric columns
+		"SHOW STATS": {columns: []string{"database", "total_query_count", "avg_query_time"}, rows: [][]driver.Value{{"pgbouncer", int64(9), []byte("12")}}},
 	}
 }
 
@@ -198,5 +200,37 @@ func TestCommandHandler(t *testing.T) {
 	}
 	if rec := get(t, router, "/fail"); rec.Code != http.StatusInternalServerError {
 		t.Errorf("/fail: status %d", rec.Code)
+	}
+}
+
+// The JSON API contract for representative nullable, boolean and numeric fields.
+func TestStatusJSONTypes(t *testing.T) {
+	withGlobals(t, configuration{}, openFakeDB(t, statusFixtures()))
+	router := httprouter.New()
+	addStatusHandlers(router)
+
+	tests := []struct {
+		path, key string
+		want      any
+	}{
+		{"/status/users", "pool_size", nil}, // "" from PGBouncer means unset
+		{"/status/users", "pool_mode", nil},
+		{"/status/users", "max_user_connections", float64(0)}, // missing column -> zero
+		{"/status/configs", "changeable", false},
+		{"/status/configs", "default", "6432"},
+		{"/status/databases", "port", float64(5432)},
+		{"/status/pools", "pool_mode", nil},
+		{"/status/stats", "avg_query_time", float64(12)},
+	}
+	for _, tt := range tests {
+		rec := get(t, router, tt.path)
+		var rows []map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil || len(rows) != 1 {
+			t.Fatalf("%s: %s (%v)", tt.path, rec.Body, err)
+		}
+		got, ok := rows[0][tt.key]
+		if !ok || got != tt.want {
+			t.Errorf("%s %s = %#v (present %v), want %#v", tt.path, tt.key, got, ok, tt.want)
+		}
 	}
 }

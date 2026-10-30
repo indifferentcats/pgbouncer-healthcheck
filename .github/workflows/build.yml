@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Cancel superseded runs for the same branch/PR
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build and integration test (linux/${{ matrix.arch }})
@@ -31,6 +36,7 @@ jobs:
     env:
       TASK_VERSION: 3.54.0
       CONTAINER_TOOL: docker
+      ARCH: ${{ matrix.arch }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,14 +57,14 @@ jobs:
           "$HOME/.local/bin/task" --version
 
       - name: Build static binary
-        run: task build ARCH=${{ matrix.arch }} CONTAINER_TOOL=docker
+        run: task build ARCH="$ARCH" CONTAINER_TOOL="$CONTAINER_TOOL"
 
       - name: Verify binary is static
         run: |
-          file dist/linux-${{ matrix.arch }}/pgbouncer-healthcheck | tee /dev/stderr | grep -q 'statically linked'
+          file "dist/linux-$ARCH/pgbouncer-healthcheck" | tee /dev/stderr | grep -q 'statically linked'
 
       - name: Integration tests
-        run: task test ARCH=${{ matrix.arch }} CONTAINER_TOOL=docker
+        run: task test ARCH="$ARCH" CONTAINER_TOOL="$CONTAINER_TOOL"
 
       - name: Upload binary
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

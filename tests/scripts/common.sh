@@ -51,14 +51,31 @@ fi
 # Location to put fake datadog-agent binary
 DDAGENT_FAKE=/usr/bin/datadog-agent
 
+# Succeeds only if the request completed with a non-error HTTP status. A
+# connection failure (curl exits non-zero) counts as an error.
 _curl() {
     url=$1
-    if STATUSCODE=$(curl "${curl_opts[@]}" "$url"); then
-        if [[ $STATUSCODE -gt 400 ]]; then
-            info "Request returned $STATUSCODE"
-            return 1
-        fi
+    if ! STATUSCODE=$(curl "${curl_opts[@]}" "$url"); then
+        info "Request to $url failed (no HTTP response)"
+        return 1
     fi
+    if [[ $STATUSCODE -ge 400 ]]; then
+        info "Request returned $STATUSCODE"
+        return 1
+    fi
+}
+
+# wait_for_port PORT NAME: wait up to 10s for something to accept connections
+wait_for_port() {
+    port=$1
+    name=$2
+    for _ in $(seq 50); do
+        if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    fatal "$name did not start listening on port $port"
 }
 
 init_creds() {
@@ -70,14 +87,14 @@ start_healthcheck() {
     info "Starting Healthcheck process"
     /usr/local/bin/pgbouncer-healthcheck &
     health_pid=$!
+    wait_for_port 8000 "Healthcheck"
 }
 
 start_pgbouncer() {
     info "Starting PGBouncer"
     pgbouncer -u pgbouncer /etc/pgbouncer/pgbouncer.ini >&/dev/null &
     pgbouncer_pid=$!
-    # Needs some time become ready
-    sleep 1
+    wait_for_port 6543 "PGBouncer"
 }
 
 stop_pgbouncer() {

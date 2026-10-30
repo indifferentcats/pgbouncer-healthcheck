@@ -17,17 +17,21 @@ type scanTarget struct {
 	Limit    OptionalInt `db:"limit" json:"limit"`
 	Missing  int64       `db:"missing" json:"missing"`
 	Untagged string
+	Skipped  string `db:"-"`
+	secret   string `db:"secret"` //nolint:unused // unexported fields must be ignored
 }
 
 func TestQueryRowsMatchesColumnsByName(t *testing.T) {
 	db := openFakeDB(t, map[string]fakeResult{
 		"SHOW THINGS": {
-			// Order differs from the struct, includes an unknown column,
-			// and omits "missing".
-			columns: []string{"flag", "unknown", "limit", "name", "optional", "count"},
+			// Order differs from the struct and includes an unknown column.
+			// "missing" is absent; columns matching only a field name,
+			// a differently-cased tag, `db:"-"` or an unexported field
+			// must not be bound.
+			columns: []string{"flag", "unknown", "limit", "name", "optional", "count", "Untagged", "Missing", "-", "secret"},
 			rows: [][]driver.Value{
-				{"yes", "ignored", int64(7), []byte("a"), "x", int64(3)},
-				{"no", nil, "", "b", nil, nil},
+				{"yes", "ignored", int64(7), []byte("a"), "x", int64(3), "u", int64(1), "s", "p"},
+				{"no", nil, "", "b", nil, nil, "u", int64(1), "s", "p"},
 			},
 		},
 	})
@@ -42,7 +46,8 @@ func TestQueryRowsMatchesColumnsByName(t *testing.T) {
 
 	a := got[0]
 	if a.Name != "a" || a.Count != 3 || a.Optional == nil || *a.Optional != "x" ||
-		!bool(a.Flag) || a.Limit != (OptionalInt{7, true}) || a.Missing != 0 || a.Untagged != "" {
+		!bool(a.Flag) || a.Limit != (OptionalInt{7, true}) || a.Missing != 0 || a.Untagged != "" ||
+		a.Skipped != "" || a.secret != "" {
 		t.Errorf("row 0 = %+v", a)
 	}
 

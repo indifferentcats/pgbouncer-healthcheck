@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Cancel superseded runs for the same branch/PR
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unit:
     name: Go unit tests
@@ -32,7 +37,7 @@ jobs:
           mkdir -p dist
           go test -race -count=1 -covermode=atomic -coverprofile=dist/coverage.out -json ./... \
             | tee dist/test-results.json \
-            | jq -rj 'select(.Action == "output") | .Output'
+            | jq -rj 'select(.Action == "output" or .Action == "build-output") | .Output'
 
       - name: Test report
         if: always()
@@ -41,16 +46,18 @@ jobs:
           results=dist/test-results.json
           count() { jq -s --arg a "$1" '[.[] | select(.Test != null and .Action == $a)] | length' "$results"; }
           passed=$(count pass); failed=$(count fail); skipped=$(count skip)
+          # Package-level failures (build errors, panics, timeouts) have no Test
+          pkg_failed=$(jq -s '[.[] | select(.Test == null and .Action == "fail")] | length' "$results")
           {
             echo "## Unit tests"
             echo
-            echo "| ✅ Passed | ❌ Failed | ⏭️ Skipped |"
-            echo "|---|---|---|"
-            echo "| $passed | $failed | $skipped |"
-            if [ "$failed" -gt 0 ]; then
+            echo "| ✅ Passed | ❌ Failed | ⏭️ Skipped | 📦 Packages failed |"
+            echo "|---|---|---|---|"
+            echo "| $passed | $failed | $skipped | $pkg_failed |"
+            if [ "$failed" -gt 0 ] || [ "$pkg_failed" -gt 0 ]; then
               echo
               echo "### Failures"
-              jq -rs '.[] | select(.Test != null and .Action == "fail") | "- `\(.Test)`"' "$results"
+              jq -rs '.[] | select(.Action == "fail") | "- `\(.Package)\(if .Test then " " + .Test else " (package)" end)`"' "$results"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -94,7 +101,7 @@ jobs:
       contents: write
     concurrency:
       group: coverage-badge
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,9 +113,17 @@ jobs:
           case "$PCT" in
             ''|*[!0-9.]*) echo "Invalid coverage value: '$PCT'" >&2; exit 1 ;;
           esac
+          # Only publish for the current master head, so a slow or re-run older
+          # run can't overwrite the badge with stale coverage
+          head=$(git ls-remote origin refs/heads/master | cut -f1)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "master is now at ${head}; skipping badge for ${GITHUB_SHA}"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git fetch --depth 1 origin badges:refs/remotes/origin/badges; then
+          if git ls-remote --exit-code --heads origin badges >/dev/null; then
+            git fetch --depth 1 origin badges:refs/remotes/origin/badges
             git worktree add -B badges "$RUNNER_TEMP/badges" origin/badges
           else
             git worktree add --orphan -b badges "$RUNNER_TEMP/badges"

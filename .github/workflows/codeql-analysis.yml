@@ -20,13 +20,17 @@ on:
   schedule:
     - cron: "44 22 * * 3"
 
+concurrency:
+  # Cancel superseded runs for the same branch/PR
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
     name: Analyze
     # Pinned rather than ubuntu-latest, which moves between Ubuntu releases
     runs-on: ubuntu-24.04
     permissions:
-      actions: read
       contents: read
       security-events: write
 
@@ -40,6 +44,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Install the Go toolchain declared in go.mod so autobuild uses it
       # rather than the runner's preinstalled Go.
