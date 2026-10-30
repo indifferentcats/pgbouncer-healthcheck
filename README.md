@@ -93,7 +93,22 @@ Build inputs are pinned:
 - Base images: by digest.
 - GitHub Actions: by commit SHA, with runners pinned to a specific Ubuntu
   release.
-- Downloaded tools (go-task, osv-scanner): by SHA-256. When bumping any of them, update the version and the
+- Downloaded tools (go-task, osv-scanner): by SHA-256.
+
+Dependabot (`.github/dependabot.yml`) checks weekly for updates to Go
+modules, GitHub Actions and Dockerfile images, and keeps them pinned. It
+waits 7 days after a release before proposing it, so a compromised release is
+more likely to be caught first; security updates aren't delayed. **Dependabot
+only opens pull requests. Nothing auto-merges them**: the repository's
+auto-merge setting is off, no workflow merges PRs, and every update needs a
+person to review and merge it. The owner is requested as a reviewer through
+`.github/CODEOWNERS` and assigned to each PR, which sends notification emails.
+
+Dependabot doesn't update these, so bump them by hand:
+- the `golang:<version>-trixie@sha256:` image in the workflows' `container:`
+  blocks
+- `toolchain` in `go.mod` and `tools/go.mod`
+- the SHA-256-pinned go-task and osv-scanner downloads When bumping any of them, update the version and the
 hash together.
 
 ## Configuration

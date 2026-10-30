@@ -130,6 +130,10 @@ Field mapping (2.x → 3.0). Fields not listed under "Added" are new in 3.0.
   `osv-scanner` (which includes OpenSSF malicious-package reports) scan the
   dependencies. On PRs, `dependency-review` blocks newly added dependencies and
   GitHub Actions with known advisories. Run locally with `task vuln`.
+- Dependabot version updates for Go modules, GitHub Actions and Dockerfile
+  images. They wait 7 days after a release, are open-PR-only (never
+  auto-merged), and notify the code owner. The Dockerfile now writes its
+  digest-pinned base images directly in `FROM` so Dependabot can update them.
 
 ## [2.0]
 

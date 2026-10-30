@@ -1,0 +1,60 @@
+# Dependabot version updates. Dependabot only OPENS pull requests; nothing here
+# (and no workflow in this repo) merges them. Every PR must be reviewed and
+# merged by a person. Code owners (.github/CODEOWNERS) are requested as
+# reviewers automatically, and PRs are also assigned to the owner, so both
+# trigger GitHub notification emails.
+#
+# Pins are preserved: GitHub Actions stay pinned by commit SHA (the
+# `# vX.Y.Z` comment is updated too), Docker images by tag+digest, Go modules
+# by go.sum hashes.
+#
+# Not covered by Dependabot, update by hand (see README "Supply-chain pinning"):
+# the golang:<version>-trixie@sha256 image in workflow `container:` blocks,
+# `toolchain` in go.mod/tools/go.mod, and the SHA-256-pinned go-task and
+# osv-scanner downloads.
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+      - "/tools"
+    schedule:
+      interval: weekly
+      day: monday
+    # Wait before proposing brand-new releases, so a compromised release is
+    # more likely to be detected and yanked first. Security updates are not
+    # delayed.
+    cooldown:
+      default-days: 7
+    assignees: ["indifferentcats"]
+    commit-message:
+      prefix: "deps"
+    groups:
+      go-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    assignees: ["indifferentcats"]
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    assignees: ["indifferentcats"]
+    commit-message:
+      prefix: "build"
